@@ -10,12 +10,14 @@ namespace game {
 		int32_t key_throw_torch = -1;
 		int32_t key_shoot = -1;
 		int32_t key_reload = -1;
+		int32_t key_construct = -1;
 
 		int32_t key_walk_forward = -1;
 		int32_t key_walk_left = -1;
 		int32_t key_walk_right = -1;
 		int32_t key_walk_back = -1;
 
+		
 		rynx::vec3f lookAtWorldPos;
 
 	public:

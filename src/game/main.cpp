@@ -165,10 +165,16 @@ int main(int argc, char** argv) {
 	rynx::timer frame_timer_dt;
 	float dt = 1.0f / 120.0f;
 
-	auto poly = rynx::Shape::makeBox(15.0f);
-	auto mesh = rynx::polygon_triangulation().generate_polygon_boundary(poly, application.textures()->textureLimits("Empty"));
-	mesh->build();
+	// construct hero object.
 	{
+		auto poly = rynx::Shape::makeBox(15.0f);
+		
+		{
+			auto mesh = rynx::polygon_triangulation().generate_polygon_boundary(poly, application.textures()->textureLimits("Empty"));
+			mesh->build();
+			meshes->create("hero_mesh", std::move(mesh));
+		}
+
 		rynx::vec3f pos;
 		float angle = 0;
 		float radius = poly.radius();
@@ -176,7 +182,7 @@ int main(int argc, char** argv) {
 			rynx::components::position(pos, angle),
 			rynx::components::collisions{ gameCollisionsSetup.category_dynamic().value },
 			rynx::components::boundary({ poly.generateBoundary_Outside(1.0f) }, pos, angle),
-			rynx::components::mesh(mesh.get()),
+			rynx::components::mesh(meshes->get("hero_mesh")),
 			rynx::matrix4(),
 			rynx::components::radius(radius),
 			rynx::components::color({ 0.2f, 1.0f, 0.3f, 1.0f }),
