@@ -14,27 +14,6 @@
 #include <rynx/graphics/text/fontdata/consolamono.hpp>
 #include <rynx/graphics/text/fontdata/lenka.hpp>
 
-class sound_mapper {
-public:
-	void insert(std::string name, int value) {
-		m_data[name].emplace_back(value);
-	}
-
-	int get(const std::string& name) const {
-		auto it = m_data.find(name);
-		if (it != m_data.end()) {
-			if (!it->second.empty()) {
-				return it->second[m_random(it->second.size())];
-			}
-		}
-		return 0;
-	}
-
-private:
-	mutable rynx::math::rand64 m_random;
-	rynx::unordered_map<std::string, std::vector<int>> m_data;
-};
-
 inline void plop(
 	rynx::ecs& ecs,
 	rynx::mesh_collection& meshes,
@@ -45,7 +24,7 @@ inline void plop(
 	std::vector<rynx::mesh*> mesh_vec;
 
 	auto addMesh = [&](std::string name, rynx::polygon poly) {
-		auto* mesh_p = meshes.create(name, rynx::polygon_triangulation().generate_polygon_boundary(poly, textures.textureLimits("Empty")));
+		auto* mesh_p = meshes.create(name, rynx::polygon_triangulation().generate_polygon_boundary(poly, textures.textureLimits("Empty")), "Empty");
 		poly_vec.emplace_back(poly);
 		mesh_vec.emplace_back(mesh_p);
 	};
