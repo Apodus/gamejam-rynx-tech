@@ -1,8 +1,13 @@
 - 2 2
 2 1 Frame
+2 2 Wheel
+
+- 2 4
+1 4 BikeBody
 
 - 4 4
 2 2 ButtonBase
 1 3 Hero
 1 2 Empty
 2 1 Selection
+2 3 Head
