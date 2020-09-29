@@ -82,7 +82,7 @@ void game::hero_control::onFrameProcess(rynx::scheduler::context& context, float
 				auto* mot = entity.try_get<rynx::components::motion>();
 				
 				const float max_speed = 75;
-				const float max_acceleration = 200;
+				const float max_acceleration = 400;
 				if (mot) {
 					mot->angularAcceleration = -max_acceleration * (max_speed + mot->angularVelocity) / max_speed;
 				}

@@ -272,7 +272,7 @@ int main(int argc, char** argv) {
 		);
 
 		auto front_wheel_id = ecs.create(
-			rynx::components::position(pos + rynx::vec3f(+25, -40, 0), angle),
+			rynx::components::position(pos + rynx::vec3f(+27, -40, 0), angle),
 			rynx::components::collisions{ gameCollisionsSetup.category_dynamic().value },
 			rynx::components::mesh(meshes->get("wheel")),
 			rynx::matrix4(),
@@ -319,11 +319,19 @@ int main(int argc, char** argv) {
 			return ecs.create(joint, rynx::components::invisible());
 		};
 
-		connect_wheel_to_body(back_wheel_id, bike_body_id, 0.8f, 3.0f, +0.256f, { -5, +5, 0 });
-		connect_wheel_to_body(back_wheel_id, bike_body_id, 0.8f, 3.0f, +0.256f, { +5, -5, 0 });
+		constexpr float fix_velocity = 0.55f;
+		constexpr float frontback_joints_strength = 0.03f;
+		constexpr float bike_joints_strength = 0.0805f;
+		constexpr float front_wheel_joint_mul = 0.75f;
 
-		connect_wheel_to_body(front_wheel_id, bike_body_id, 0.8f, 3.0f, +0.256f, { +5, +5, 0 });
-		connect_wheel_to_body(front_wheel_id, bike_body_id, 0.8f, 3.0f, +0.256f, { -5, -5, 0 });
+		connect_wheel_to_body(back_wheel_id, bike_body_id, frontback_joints_strength, 3.0f, fix_velocity, { -45, +13, 0 });
+		connect_wheel_to_body(back_wheel_id, bike_body_id, frontback_joints_strength, 3.0f, fix_velocity, { +15, -25, 0 });
+
+		connect_wheel_to_body(front_wheel_id, bike_body_id, frontback_joints_strength * front_wheel_joint_mul, 3.0f, fix_velocity, { +52, +15, 0 });
+		connect_wheel_to_body(front_wheel_id, bike_body_id, frontback_joints_strength * front_wheel_joint_mul, 3.0f, fix_velocity, { -15, -25, 0 });
+
+		connect_wheel_to_body(back_wheel_id, bike_body_id, bike_joints_strength, 3.0f, fix_velocity, { +19, +27, 0 });
+		connect_wheel_to_body(front_wheel_id, bike_body_id, bike_joints_strength * front_wheel_joint_mul, 3.0f, fix_velocity, { -10, +27, 0 });
 
 		// connect rider to bike body or something.
 		connect_wheel_to_body(head_id, bike_body_id, 0.9f, 3.0f, +0.056f, { -5, 0, 0 }, { -5, 0, 0 });
