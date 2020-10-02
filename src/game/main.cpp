@@ -1,6 +1,7 @@
 
 #include <rynx/application/application.hpp>
 #include <rynx/application/visualisation/debug_visualisation.hpp>
+#include <rynx/application/visualisation/geometry/scrolling_background_2d.hpp>
 #include <rynx/application/logic.hpp>
 #include <rynx/application/render.hpp>
 #include <rynx/application/simulation.hpp>
@@ -51,6 +52,9 @@
 
 #include <rynx/math/spline.hpp>
 
+#include <game/terrain.hpp>
+#include <game/bike_creation.hpp>
+
 template<typename T>
 struct range {
 	range(T b, T e) : begin(b), end(e) {}
@@ -69,7 +73,7 @@ void attach_fire_to(rynx::ecs& ecs, rynx::ecs::id id) {
 	emitter.edit().color_ranges(
 		{ rynx::floats4{0.5f, 0.3f, 0.0f, 0.3f}, rynx::floats4{0.6f, 0.4f, 0.0f, 0.3f} },
 		{ rynx::floats4{1.0f, 0.3f, 0.0f, 0.0f}, rynx::floats4{1.0f, 0.6f, 0.1f, 0.0f} }
-	).radius_ranges(
+	).radius_ranges(	
 		{ 4.0f, 7.5f },
 		{ 0.0f, 0.1f }
 	).lifetime_range({ 0.6f, 1.2f })
@@ -83,66 +87,7 @@ void attach_fire_to(rynx::ecs& ecs, rynx::ecs::id id) {
 	ecs.attachToEntity(id, emitter);
 }
 
-class background_geometry_step : public rynx::application::igraphics_step {
-public:
-	background_geometry_step(rynx::MeshRenderer& mesh_renderer, std::shared_ptr<rynx::camera> camera, rynx::mesh* m) : m_bg_mesh(m), m_camera(camera), m_mesh_renderer(mesh_renderer) {}
-	virtual ~background_geometry_step() {}
-	virtual void execute() override {
-		rynx::matrix4 model;
-		model.discardSetTranslate(m_pos);
-		model.scale(m_scale);
 
-		rynx::floats4 color{1, 1, 1, 1};
-		m_bg_mesh->bind();
-		m_bg_mesh->rebuildTextureBuffer();
-		m_mesh_renderer.drawMeshInstancedDeferred(*m_bg_mesh, 1, &model, &color);
-	}
-	
-	virtual void prepare(rynx::scheduler::context* ctx) {
-		auto new_bg_pos = m_camera->position();
-		new_bg_pos.z = -10.0f;
-		m_scale = (m_camera->position().z - new_bg_pos.z) * m_aspect_ratio;
-		m_pos = new_bg_pos;
-		
-		auto& uvs = m_bg_mesh->texCoords;
-		rynx_assert(uvs.size() == 8, "size mismatch");
-
-		auto cam_pos = m_camera->position();
-
-		float uv_x_mul = 1.0f / 2048.0f;
-		float uv_y_mul = 1.0f / 2048.0f;
-		float uv_z_mul = 0.001f;
-		int uv_i = 0;
-
-		float uv_x_modifier = cam_pos.y * uv_x_mul + cam_pos.z * uv_z_mul;
-		float uv_y_modifier = cam_pos.x * uv_y_mul + cam_pos.z * uv_z_mul;
-		constexpr float back_ground_image_scale = 0.25f;
-
-		uvs[uv_i++] = 1.0f / back_ground_image_scale + uv_x_modifier;
-		uvs[uv_i++] = 0.0f / back_ground_image_scale + uv_y_modifier;
-
-		uvs[uv_i++] = 0.0f / back_ground_image_scale + uv_x_modifier;
-		uvs[uv_i++] = 0.0f / back_ground_image_scale + uv_y_modifier;
-
-		uvs[uv_i++] = 0.0f / back_ground_image_scale + uv_x_modifier;
-		uvs[uv_i++] = 1.0f / back_ground_image_scale + uv_y_modifier;
-
-		uvs[uv_i++] = 1.0f / back_ground_image_scale + uv_x_modifier;
-		uvs[uv_i++] = 1.0f / back_ground_image_scale + uv_y_modifier;
-	}
-
-	void set_aspect_ratio(float aspect_ratio) {
-		m_aspect_ratio = aspect_ratio;
-	}
-
-private:
-	rynx::mesh* m_bg_mesh = nullptr;
-	std::shared_ptr<rynx::camera> m_camera;
-	rynx::MeshRenderer& m_mesh_renderer;
-	rynx::vec3f m_pos;
-	float m_scale = 1.0f;
-	float m_aspect_ratio = 1.0f;
-};
 
 int main(int argc, char** argv) {
 
@@ -200,16 +145,37 @@ int main(int argc, char** argv) {
 	audio.set_volume(1.0f);
 	audio.adjust_volume(1.5f);
 
-	audio.load("../sound/music/boogie01.ogg", "boogie");
-	audio.load("../sound/music/boogie02.ogg", "boogie");
-	audio.load("../sound/music/boogie03.ogg", "boogie");
-	
 	audio.load("../sound/music/bg01.ogg", "bg");
 	audio.load("../sound/music/bg02.ogg", "bg");
 	audio.load("../sound/music/bg03.ogg", "bg");
 	audio.load("../sound/music/bg04.ogg", "bg");
-	
-	audio.load("../sound/music/tune1.ogg", "tune");
+
+	audio.load("../sound/bike/rest01.ogg", "bike_rest");
+	audio.load("../sound/bike/rest02.ogg", "bike_rest");
+	audio.load("../sound/bike/rest03.ogg", "bike_rest");
+
+	audio.load("../sound/bike/rest_base01.ogg", "bike_rest_base");
+	audio.load("../sound/bike/rest_base02.ogg", "bike_rest_base");
+	audio.load("../sound/bike/rest_base03.ogg", "bike_rest_base");
+	audio.load("../sound/bike/rest_base04.ogg", "bike_rest_base");
+
+	audio.load("../sound/bike/wheel_roll01.ogg", "wheel_roll");
+	audio.load("../sound/bike/wheel_roll02.ogg", "wheel_roll");
+	audio.load("../sound/bike/wheel_roll03.ogg", "wheel_roll");
+
+	audio.load("../sound/bike/wheel_bump01.ogg", "wheel_bump");
+	audio.load("../sound/bike/wheel_bump02.ogg", "wheel_bump");
+
+	audio.load("../sound/bike/susp01.ogg", "suspension");
+
+	/*
+	audio.load("../sound/bike/suspension01.ogg", "suspension");
+	audio.load("../sound/bike/suspension02.ogg", "suspension");
+	audio.load("../sound/bike/suspension03.ogg", "suspension");
+	audio.load("../sound/bike/suspension04.ogg", "suspension");
+	audio.load("../sound/bike/suspension05.ogg", "suspension");
+	audio.load("../sound/bike/suspension06.ogg", "suspension");
+	*/
 
 	game_collisions gameCollisionsSetup(*detection);
 	
@@ -219,135 +185,9 @@ int main(int argc, char** argv) {
 		base_simulation.set_resource(&audio);
 		base_simulation.set_resource(camera.get());
 	}
-
-
-	// construct hero object.
-	auto construct_player = [&](rynx::vec3f pos)
-	{
-		auto poly = rynx::Shape::makeBox(15.0f);
-
-		{
-			auto mesh = rynx::polygon_triangulation().generate_polygon_boundary(poly, application.textures()->textureLimits("Empty"), 3.0f);
-			mesh->build();
-			meshes->create("hero_mesh", std::move(mesh), "Empty");
-		}
-
-		float angle = 0;
-		float radius = poly.radius();
-		
-		float wheel_radius_scale = 1.3f;
-		float head_radius_scale = 1.0f;
-
-		rynx::components::light_omni light;
-		light.ambient = 0.3f;
-		light.attenuation_linear = 1.5f;
-		light.attenuation_quadratic = 0.005f;
-		light.color = {1.0f, 1.0f, 1.0f, 5.0f};
-
-		auto head_id = ecs.create(
-			light,
-			rynx::components::position(pos, angle),
-			rynx::components::collisions{ gameCollisionsSetup.category_dynamic().value },
-			rynx::components::boundary({ poly.generateBoundary_Outside(head_radius_scale) }, pos, angle),
-			rynx::components::mesh(meshes->get("head")),
-			rynx::matrix4(),
-			rynx::components::radius(radius * head_radius_scale),
-			rynx::components::color({ 1.0f, 1.0f, 1.0f, 1.0f }),
-			rynx::components::motion({ 0, 0, 0 }, 0),
-			rynx::components::physical_body(150, 15000, 0.0f, 1.0f),
-			rynx::components::dampening{ 0.05f, 0.05f },
-			rynx::components::collision_custom_reaction{}
-		);
-
-		auto back_wheel_id = ecs.create(
-			rynx::components::position(pos + rynx::vec3f(-22, -40, 0), angle),
-			rynx::components::collisions{ gameCollisionsSetup.category_dynamic().value },
-			rynx::components::mesh(meshes->get("wheel")),
-			rynx::matrix4(),
-			rynx::components::radius(radius * wheel_radius_scale),
-			rynx::components::color({ 1.0f, 1.0f, 1.0f, 1.0f }),
-			rynx::components::motion({ 0, 0, 0 }, -10),
-			rynx::components::physical_body(50, 4000, 0.0f, 30.0f),
-			rynx::components::dampening{ 0.05f, 0.05f }
-		);
-
-		auto front_wheel_id = ecs.create(
-			rynx::components::position(pos + rynx::vec3f(+27, -40, 0), angle),
-			rynx::components::collisions{ gameCollisionsSetup.category_dynamic().value },
-			rynx::components::mesh(meshes->get("wheel")),
-			rynx::matrix4(),
-			rynx::components::radius(radius * wheel_radius_scale),
-			rynx::components::color({ 1.0f, 1.0f, 1.0f, 1.0f }),
-			rynx::components::motion({ 0, 0, 0 }, 0),
-			rynx::components::physical_body(50, 4000, 0.0f, 10.0f),
-			rynx::components::dampening{ 0.05f, 0.05f }
-		);
-
-		rynx::components::light_directed bike_light;
-		bike_light.ambient = 0;
-		bike_light.angle = 1.55f;
-		bike_light.attenuation_linear = 1.5f;
-		bike_light.attenuation_quadratic = 0.001f;
-		bike_light.direction = {1.0f, 0.0f, 0.0f};
-		bike_light.edge_softness = 0.3f;
-		bike_light.color = {1.0f, 0.6f, 0.2f, 50.0f};
-
-		auto bike_body_id = ecs.create(
-			bike_light,
-			rynx::components::position(pos + rynx::vec3f(+0, -25, 0), angle),
-			// rynx::components::collisions{ gameCollisionsSetup.category_dynamic().value },
-			rynx::components::mesh(meshes->get("bike_body")),
-			rynx::matrix4(),
-			rynx::components::radius(radius * 3.3f),
-			rynx::components::color({ 1.0f, 1.0f, 1.0f, 1.0f }),
-			rynx::components::motion({ 0, 0, 0 }, 0),
-			rynx::components::physical_body(250, 45000, 0.0f, 1.0f),
-			rynx::components::dampening{ 0.05f, 0.05f }
-		);
-
-		auto connect_wheel_to_body = [&ecs](rynx::ecs::id wheel_id, rynx::ecs::id body_id, float strength, float softness, float response_time, rynx::vec3f pos, rynx::vec3f pos2 = {}) {
-			rynx::components::phys::joint joint;
-			joint.connect_with_spring().rotation_free();
-			joint.id_a = wheel_id;
-			joint.id_b = body_id;
-			joint.point_a = pos2;
-			joint.point_b = pos;
-			joint.strength = strength;
-			joint.softness = softness;
-			joint.response_time = response_time;
-			joint.length = rynx::components::phys::compute_current_joint_length(joint, ecs);
-			return ecs.create(joint, rynx::components::invisible());
-		};
-
-		constexpr float fix_velocity = 0.55f;
-		constexpr float frontback_joints_strength = 0.03f;
-		constexpr float bike_joints_strength = 0.0805f;
-		constexpr float front_wheel_joint_mul = 0.75f;
-
-		connect_wheel_to_body(back_wheel_id, bike_body_id, frontback_joints_strength, 3.0f, fix_velocity, { -45, +13, 0 });
-		connect_wheel_to_body(back_wheel_id, bike_body_id, frontback_joints_strength, 3.0f, fix_velocity, { +15, -25, 0 });
-
-		connect_wheel_to_body(front_wheel_id, bike_body_id, frontback_joints_strength * front_wheel_joint_mul, 3.0f, fix_velocity, { +52, +15, 0 });
-		connect_wheel_to_body(front_wheel_id, bike_body_id, frontback_joints_strength * front_wheel_joint_mul, 3.0f, fix_velocity, { -15, -25, 0 });
-
-		connect_wheel_to_body(back_wheel_id, bike_body_id, bike_joints_strength, 3.0f, fix_velocity, { +19, +27, 0 });
-		connect_wheel_to_body(front_wheel_id, bike_body_id, bike_joints_strength * front_wheel_joint_mul, 3.0f, fix_velocity, { -10, +27, 0 });
-
-		// connect rider to bike body or something.
-		connect_wheel_to_body(head_id, bike_body_id, 0.9f, 3.0f, +0.056f, { -5, 0, 0 }, { -5, 0, 0 });
-		connect_wheel_to_body(head_id, bike_body_id, 0.9f, 1.0f, +0.056f, { +5, 0, 0 }, { +5, 0, 0 });
-		connect_wheel_to_body(head_id, bike_body_id, 0.9f, 3.0f, +0.056f, { 0, 0, 0 }, { 0, 0, 0 });
-		auto hand_joint_id = connect_wheel_to_body(head_id, bike_body_id, 1.2f, 2.0f, +0.016f, { +22, +10, 0 }, { +5, 0, 0 }); // hand to steering.
-
-		// attach_fire_to(ecs, back_wheel_id);
-		// attach_fire_to(ecs, front_wheel_id);
-
-		return std::tie(back_wheel_id, front_wheel_id, head_id, bike_body_id, hand_joint_id);
-	};
 	
-	auto bike_ids = construct_player({ 0, 35, 0 });
-	const auto& [back_wheel_id, front_wheel_id, head_id, bike_body_id, hand_joint_id] = bike_ids;
-
+	const auto [back_wheel_id, front_wheel_id, head_id, bike_body_id, hand_joint_id] = game::construct_player(ecs, *application.textures(), gameCollisionsSetup.category_dynamic(), *meshes, { -100, 0, 0 });
+	
 	// setup game logic
 	{
 		auto ruleset_hero_inputs = base_simulation.create_rule_set<game::hero_control>(gameInput, back_wheel_id, front_wheel_id, head_id, bike_body_id, hand_joint_id);
@@ -385,11 +225,12 @@ int main(int argc, char** argv) {
 
 	rynx::graphics::screenspace_draws(); // initialize gpu buffers for screenspace ops.
 	rynx::application::renderer render(application, camera);
+	
 	render.set_lights_resolution(1.0f, 1.0f); // reduce pixels to make shit look bad
 	render.light_global_ambient({ 1.0f, 1.0f, 1.0f, 0.25f });
 	render.light_global_directed({ 1.0f, 1.0f, 1.0f, 0.0f }, { 1, 0 ,0 });
 
-	auto bg_draw = std::make_unique<background_geometry_step>(application.meshRenderer(), camera, meshes->get("background"));
+	auto bg_draw = std::make_unique<rynx::application::visualization::scrolling_background_2d>(application.meshRenderer(), camera, meshes->get("background"));
 	auto* p_bg_draw = bg_draw.get();
 	render.geometry_step_insert_front(std::move(bg_draw));
 
@@ -398,103 +239,8 @@ int main(int argc, char** argv) {
 	rynx::sound::configuration music;
 	rynx::timer frame_timer_dt;
 	float dt = 1.0f / 120.0f;
-
-	auto create_terrain = [&]() {
-
-		std::string mesh_name("terrain");
-
-		
-		rynx::polygon p;
-		rynx::polygon terrain_surface;
-		{
-			float x_value = -1000.0f;
-			while (x_value < +5000) {
-				float y_value =
-					250.0f * std::sinf(x_value * 0.0017f) +
-					110.0f * std::sinf(x_value * 0.0073f) +
-					50.0f * std::sinf(x_value * 0.013f) - 100.0f;
-				p.vertices.emplace_back(x_value, y_value, 0.0f);
-				x_value += 10.0f;
-			}
-
-			terrain_surface = p;
-
-			p.vertices.emplace_back(rynx::vec3f{ +5100.0f, -1000.0f, 0.0f });
-			p.vertices.emplace_back(rynx::vec3f{-600.0f, -1000.0f, 0.0f});
-
-			std::reverse(p.vertices.begin(), p.vertices.end());
-		}
-
-		terrain_surface.scale(1.0f / p.radius());
-		std::vector<rynx::vec3f>& vertices = terrain_surface.vertices;
-
-		std::unique_ptr<rynx::mesh> m = std::make_unique<rynx::mesh>();
-		auto uv_limits = application.textures()->textureLimits("Empty");
-
-		for (int32_t i = 0; i < vertices.size(); ++i) {
-			auto& v = vertices[i];
-			m->vertices.emplace_back(v.x);
-			m->vertices.emplace_back(v.y);
-			m->vertices.emplace_back(v.z);
-
-			m->vertices.emplace_back(v.x);
-			m->vertices.emplace_back(-1000.0f);
-			m->vertices.emplace_back(v.z);
-
-			auto normal = [&]() {
-				if (i == 0) {
-					return (vertices[1] - vertices[0]).normal2d();
-				}
-				if (i == vertices.size() - 1) {
-					return (vertices[i] - vertices[i - 1]).normal2d();
-				}
-				return (vertices[i + 1] - vertices[i - 1]).normal2d();
-			}();
-			normal.normalize();
-
-			m->normals.emplace_back(normal.x);
-			m->normals.emplace_back(normal.y);
-			m->normals.emplace_back(normal.z);
-
-			m->normals.emplace_back(0.0f);
-			m->normals.emplace_back(-1.0f);
-			m->normals.emplace_back(0.0f);
-
-			if (i > 1) {
-				m->indices.emplace_back(static_cast<short>(2*i-3));
-				m->indices.emplace_back(static_cast<short>(2*i));
-				m->indices.emplace_back(static_cast<short>(2*i-1));
-
-				m->indices.emplace_back(static_cast<short>(2*i));
-				m->indices.emplace_back(static_cast<short>(2*i-3));
-				m->indices.emplace_back(static_cast<short>(2*i-2));
-			}
-
-			// UVs are total bullshit. TODO: fix.
-			m->texCoords.emplace_back(uv_limits.x);
-			m->texCoords.emplace_back(uv_limits.y);
-			m->texCoords.emplace_back(uv_limits.z);
-			m->texCoords.emplace_back(uv_limits.w);
-		}
-
-		auto* mesh_p = meshes->create(mesh_name, std::move(m), "Empty");
-		float radius = p.radius();
-		
-		return base_simulation.m_ecs.create(
-			rynx::components::position({}, 0.0f),
-			rynx::components::collisions{ gameCollisionsSetup.category_static().value },
-			rynx::components::boundary({ p.generateBoundary_Outside(1.0f) }, {}, 0.0f),
-			rynx::components::mesh(mesh_p),
-			rynx::matrix4(),
-			rynx::components::radius(radius),
-			rynx::components::color({ 0.2f, 1.0f, 0.3f, 1.0f }),
-			rynx::components::physical_body(std::numeric_limits<float>::max(), std::numeric_limits<float>::max(), 0.0f, 1.0f),
-			rynx::components::ignore_gravity(),
-			rynx::components::dampening{ 0.50f, 1.0f }
-		);
-	};
 	
-	create_terrain();
+	game::create_terrain(base_simulation.m_ecs, *meshes, *application.textures(), "Empty", gameCollisionsSetup.category_static());
 
 	auto marker_id = ecs.create(
 		rynx::components::position({0.0f, -55.0f, 0.0f}, 0),
@@ -530,6 +276,9 @@ int main(int argc, char** argv) {
 
 	float path_point = 0.0f;
 
+	rynx::numeric_property<float> logic_fps;
+	rynx::numeric_property<float> render_fps;
+
 	while (!application.isExitRequested()) {
 		rynx_profile("Main", "frame");
 		
@@ -558,7 +307,8 @@ int main(int argc, char** argv) {
 		
 		// TODO: Move music playing to some ruleset.
 		if (music.completion_rate() > 0.90f) {
-			music = audio.play_sound("bg", { 0, 0, 0 }, { 0, 0, 0 }, 1.0f);
+			music = audio.play_sound("bg", { 0, 0, 0 }, { 0, 0, 0 }, 0.1f);
+			music.set_ambient(true);
 		}
 		
 		camera->setProjection(0.02f, 2000.0f, application.aspectRatio());
@@ -582,7 +332,15 @@ int main(int argc, char** argv) {
 			path_points[(int32_t(path_point) + 1) % path_points.size()] * (path_point - int32_t(path_point));
 
 		// should we render or not.
+		static float time_since_prev_rendered_frame = 1.0f;
+		constexpr float target_fps = 120.0f;
+
+		time_since_prev_rendered_frame += dt;
+		if(time_since_prev_rendered_frame > 1.0f / target_fps)
 		{
+			render_fps.observe_value(1.0f / time_since_prev_rendered_frame);
+			time_since_prev_rendered_frame = 0.0f;
+
 			rynx_profile("Main", "graphics");
 
 			{
@@ -600,6 +358,12 @@ int main(int argc, char** argv) {
 			{
 				rynx_profile("Main", "draw");
 				
+				std::string logic_fps_text = "logic fps: " + std::to_string(int(100 * logic_fps.avg()) / 100.0f);
+				application.textRenderer().drawText(logic_fps_text, -0.9f, +0.9f / application.aspectRatio(), 0.1f, Color::GREEN, rynx::TextRenderer::Align::Left, menu.fontConsola);
+
+				std::string render_fps_text = "render fps: " + std::to_string(int(100 * render_fps.avg()) / 100.0f);
+				application.textRenderer().drawText(render_fps_text, -0.9f, +0.8f / application.aspectRatio(), 0.1f, Color::GREEN, rynx::TextRenderer::Align::Left, menu.fontConsola);
+
 				// present result of previous frame.
 				application.swapBuffers();
 
@@ -634,6 +398,7 @@ int main(int argc, char** argv) {
 
 		// update dt for next frame.
 		dt = std::min(0.016f, std::max(0.0001f, frame_timer_dt.time_since_last_access_seconds_float()));
+		logic_fps.observe_value(1.0f / dt);
 	}
 
 	dead_lock_detector_keepalive = false;

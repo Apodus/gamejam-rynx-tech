@@ -3,6 +3,7 @@
 
 #include <rynx/application/logic.hpp>
 #include <rynx/math/vector.hpp>
+#include <rynx/audio/audio.hpp>
 
 namespace game {
 	class hero_control : public rynx::application::logic::iruleset {
@@ -24,6 +25,17 @@ namespace game {
 		rynx::ecs::id hand_joint_id;
 
 		rynx::vec3f lookAtWorldPos;
+
+		float engine_activity_slide = 0.0f;
+		float engine_acceleration_state = 0.0f;
+
+		rynx::sound::configuration bike_rest;
+		rynx::sound::configuration bike_constant_bg;
+
+		rynx::sound::configuration back_suspension;
+
+		rynx::sound::configuration wheel_roll_sound;
+		rynx::sound::configuration wheel_crash_sound;
 
 	public:
 		hero_control(rynx::mapped_input& input, rynx::ecs::id back_wheel, rynx::ecs::id front_wheel, rynx::ecs::id head, rynx::ecs::id bike_body, rynx::ecs::id hand_joint_id);

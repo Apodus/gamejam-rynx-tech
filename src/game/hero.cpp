@@ -13,6 +13,12 @@
 #include <rynx/math/geometry/plane.hpp>
 #include <rynx/math/matrix.hpp>
 
+namespace game {
+	namespace components {
+		struct suspension { float prev_length = 0.0f; };
+	}
+}
+
 game::hero_control::hero_control(rynx::mapped_input& input, rynx::ecs::id back_wheel, rynx::ecs::id front_wheel, rynx::ecs::id head, rynx::ecs::id bike_body, rynx::ecs::id hand_joint_id) {
 	key_walk_forward = input.generateAndBindGameKey('W', "walk forward");
 	key_walk_back = input.generateAndBindGameKey('S', "walk back");
@@ -31,12 +37,15 @@ game::hero_control::hero_control(rynx::mapped_input& input, rynx::ecs::id back_w
 
 void game::hero_control::onFrameProcess(rynx::scheduler::context& context, float dt) {
 	context.add_task("hero inputs", [this, dt](
-		rynx::ecs::view<rynx::components::position, rynx::components::motion, rynx::components::phys::joint, const rynx::components::physical_body, const game::hero_tag> ecs,
+		rynx::ecs::view<const rynx::components::collision_custom_reaction, game::components::suspension, const rynx::components::phys::joint, rynx::components::particle_emitter, rynx::components::position, rynx::components::motion, rynx::components::phys::joint, const rynx::components::physical_body, const game::hero_tag> ecs,
 		rynx::mapped_input& input,
 		rynx::sound::audio_system& audio,
 		rynx::camera& camera,
 		rynx::scheduler::task& task_context)
 	{
+		constexpr float max_speed = 75;
+		constexpr float max_acceleration = 400;
+
 		auto mouseScreenPos = input.mouseScreenPosition();
 		auto mousecast = camera.ray_cast(mouseScreenPos.x, mouseScreenPos.y).intersect(rynx::plane(0, 0, 1, 0));
 
@@ -44,11 +53,65 @@ void game::hero_control::onFrameProcess(rynx::scheduler::context& context, float
 			lookAtWorldPos = mousecast.first;
 		}
 
+		float total_suspension_velocity = 0.0f;
+		ecs.query().for_each([&](game::components::suspension& suspension, const rynx::components::phys::joint& j) {
+			float current_length = rynx::components::phys::compute_current_joint_length(j, ecs);
+			total_suspension_velocity += current_length - j.length;
+			suspension.prev_length = current_length;
+		});
+		total_suspension_velocity *= 0.10f;
+
 		if (ecs.exists(bike_body_id)) {
 			auto entity = ecs[bike_body_id];
+			const auto& body_pos = ecs[bike_body_id].get<const rynx::components::position>();
 			const auto* mot = entity.try_get<const rynx::components::motion>();
-			const auto* pos = entity.try_get<const rynx::components::position>();
-			camera.setPosition(pos->value + mot->velocity * 1.0f + rynx::vec3f{0, 0, 750});
+			camera.setPosition(body_pos.value + mot->velocity * 1.0f + rynx::vec3f{0, 0, 750});
+
+			if (bike_constant_bg.completion_rate() > 0.8f) {
+				bike_constant_bg = audio.play_sound("bike_rest", body_pos.value, {}, 0.4f);
+			}
+
+			if (bike_rest.completion_rate() > 0.9173f - engine_activity_slide * 0.503913f) {
+				bike_rest = audio.play_sound("bike_rest_base", body_pos.value, {}, 1.0f);
+				bike_rest.set_pitch_shift(engine_activity_slide * 0.3f - 0.15f);
+				bike_rest.set_loudness(engine_activity_slide * 0.6f + 0.25f);
+				bike_rest.set_tempo_shift(0.9f + engine_activity_slide * 0.2f);
+			}
+
+			if (back_suspension.completion_rate() > 0.9f) {
+				if (total_suspension_velocity * total_suspension_velocity > 1.0f) {
+					float v = total_suspension_velocity* total_suspension_velocity - 1.0f;
+					back_suspension = audio.play_sound("suspension", body_pos.value, {}, 1.0f);
+					back_suspension.set_loudness(std::min(1.0f, v));
+					back_suspension.set_tempo_shift(1.0f + std::clamp(v -0.3f, -0.3f, +0.3f));
+				}
+			}
+
+			ecs.query().for_each([&](const rynx::components::collision_custom_reaction& collisions, const rynx::components::motion& my_motion) {
+				for (auto&& event : collisions.events) {
+
+					float wheel_roll_mul = (2.0f - event.relative_velocity.length()) * my_motion.velocity.length() / (4.0f * max_speed);
+					if (wheel_roll_mul > 0) {
+						wheel_roll_mul = std::clamp(wheel_roll_mul, 0.0f, 1.0f);
+						if (wheel_roll_sound.completion_rate() > 0.9f) {
+							wheel_roll_sound = audio.play_sound("wheel_roll", body_pos.value, {}, wheel_roll_mul);
+							wheel_roll_sound.set_tempo_shift(1.0f + (wheel_roll_mul - 0.5f) * 0.5f);
+						}
+					}
+
+					float wheel_collision_mul = event.relative_velocity.length();
+					if (wheel_collision_mul > 100) {
+						if (wheel_crash_sound.completion_rate() > 0.1f) {
+							wheel_crash_sound = audio.play_sound("wheel_bump", body_pos.value, {}, std::clamp(wheel_collision_mul / 100.0f - 0.9f, 0.0f, 1.2f));
+						}
+					}
+				}
+			});
+
+			auto& emitter = entity.get<rynx::components::particle_emitter>();
+			emitter.spawn_rate = {200 * engine_activity_slide + 10, 500 * engine_activity_slide + 20 };
+			emitter.start_radius = {2.0f + 4 * engine_acceleration_state * engine_activity_slide, 5.0f + 5 * engine_activity_slide * engine_activity_slide};
+			emitter.initial_velocity = {40.0f * (1.0f + engine_acceleration_state), 80.0f * ( 1.0f + engine_acceleration_state) };
 		}
 
 		if (input.isKeyClicked(key_construct)) {
@@ -81,12 +144,15 @@ void game::hero_control::onFrameProcess(rynx::scheduler::context& context, float
 				auto entity = ecs[engine_wheel_id];
 				auto* mot = entity.try_get<rynx::components::motion>();
 				
-				const float max_speed = 75;
-				const float max_acceleration = 400;
 				if (mot) {
 					mot->angularAcceleration = -max_acceleration * (max_speed + mot->angularVelocity) / max_speed;
 				}
+
+				engine_activity_slide += (engine_activity_slide < 1.0f) ? dt * 2.0f : 0.0f;
 			}
+		}
+		else {
+			engine_activity_slide -= (engine_activity_slide > dt) ? dt * 0.5f: 0.0f;
 		}
 		
 		if (input.isKeyDown(key_walk_back)) {
@@ -148,92 +214,3 @@ void game::hero_control::onFrameProcess(rynx::scheduler::context& context, float
 		}
 	});
 }
-
-/*
-bool hero_relative_controls = false;
-void game::hero_control::onFrameProcess(rynx::scheduler::context& context, float) {
-	context.add_task("hero inputs", [this](
-		rynx::ecs::view<rynx::components::position, rynx::components::motion, const rynx::components::physical_body, const game::hero_tag> ecs,
-		rynx::mapped_input& input,
-		rynx::sound::audio_system& audio,
-		sound_mapper& mapper,
-		rynx::camera& camera,
-		rynx::scheduler::task& task_context) {
-		
-		auto mouseScreenPos = input.mouseScreenPosition();
-		auto mousecast = camera.ray_cast(mouseScreenPos.x, mouseScreenPos.y).intersect(rynx::plane(0, 0, 1, 0));
-		
-		if (mousecast.second) {
-			lookAtWorldPos = mousecast.first;
-		}
-		
-		ecs.query().in<game::hero_tag>().for_each([&input, &task_context, &ecs, this](rynx::ecs::id hero_id, rynx::components::position& pos, rynx::components::motion& mot) {
-			auto dstForward = (lookAtWorldPos - pos.value);
-			auto dstAngle = std::atan2f(dstForward.y, dstForward.x);
-			float dAngle = (dstAngle - pos.angle);
-
-			while (dAngle > rynx::math::pi) {
-				dAngle -= 2 * rynx::math::pi;
-				pos.angle += 2 * rynx::math::pi;
-			}
-			
-			while (dAngle < -rynx::math::pi) {
-				dAngle += 2 * rynx::math::pi;
-				pos.angle -= 2 * rynx::math::pi;
-			}
-
-			float agr = dAngle - mot.angularVelocity * 0.01f;
-			mot.angularAcceleration += agr * 250;
-
-			rynx::vec3f forward(0, 1, 0);
-			rynx::vec3f left(-1, 0, 0);
-			rynx::vec3f hero_local_forward = rynx::vec3f(std::cos(pos.angle), std::sin(pos.angle), 0);
-
-			float up_mul = (hero_local_forward.dot(forward) + 1) * 200 + 150;
-			float down_mul = (-hero_local_forward.dot(forward) + 1) * 200 + 150;
-			float left_mul = (hero_local_forward.dot(left) + 1) * 200 + 150;
-			float right_mul = (-hero_local_forward.dot(left) + 1) * 200 + 150;
-
-			if (hero_relative_controls) {
-				forward = hero_local_forward;
-				left = rynx::vec3f(-forward.y, forward.x, 0);
-
-				// in relative controls, up means "go directly forward", and this means the multipliers can be constant.
-				up_mul = 500; // forward
-				down_mul = 200; // backward
-				left_mul = 350; // left
-				right_mul = 350; // right
-			}
-
-			if (input.isKeyDown(key_walk_forward)) {
-				mot.acceleration +=  forward * up_mul;
-			}
-			if (input.isKeyDown(key_walk_back)) {
-				mot.acceleration += -forward * down_mul;
-			}
-			if (input.isKeyDown(key_walk_left)) {
-				mot.acceleration += left * left_mul;
-			}
-			if (input.isKeyDown(key_walk_right)) {
-				mot.acceleration += -left * right_mul;
-			}
-
-			if (input.isKeyDown(key_shoot)) {
-				const auto& hero_body = ecs[hero_id].get<const rynx::components::physical_body>();
-				task_context.extend_task_independent([hero_local_forward, pos, hero_collision_id = hero_body.collision_id](rynx::ecs& ecs) {
-					ecs.create(
-						rynx::components::projectile(),
-						rynx::components::position(pos),
-						rynx::components::lifetime(1.0f),
-						rynx::components::radius(1.0f),
-						rynx::components::physical_body(1.0f, 1.0f, 0.0f, 1.0f, hero_collision_id),
-						rynx::components::motion(hero_local_forward * 500, 0),
-						rynx::components::color({1, 1, 1, 1}),
-						rynx::matrix4()
-					);
-				});
-			}
-		});
-	});
-}
-*/

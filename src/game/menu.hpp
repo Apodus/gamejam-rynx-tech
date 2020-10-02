@@ -150,10 +150,10 @@ class GameMenu {
 	std::shared_ptr<rynx::graphics::framebuffer> fbo_menu;
 	std::shared_ptr<rynx::camera> m_camera;
 
+public:
 	Font fontLenka;
 	Font fontConsola;
 
-public:
 	GameMenu(std::shared_ptr<rynx::graphics::GPUTextures> textures) :
 		root({ 1, 1, 0 }),
 		fontConsola(Fonts::setFontConsolaMono()),
