@@ -23,9 +23,9 @@ namespace game {
 			float x_value = -1000.0f;
 			while (x_value < +5000) {
 				float y_value =
-					250.0f * std::sinf(x_value * 0.0017f) +
-					110.0f * std::sinf(x_value * 0.0073f) +
-					50.0f * std::sinf(x_value * 0.013f) - 100.0f;
+					250.0f * std::sin(x_value * 0.0017f) +
+					110.0f * std::sin(x_value * 0.0073f) +
+					50.0f * std::sin(x_value * 0.013f) - 100.0f;
 				p.vertices.emplace_back(x_value, y_value, 0.0f);
 				x_value += 10.0f;
 			}

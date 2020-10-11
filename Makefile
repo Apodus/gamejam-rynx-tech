@@ -17,7 +17,7 @@ RCOMPILE_FLAGS = -D NDEBUG -O3
 # Additional debug-specific flags
 DCOMPILE_FLAGS = -D DEBUG -O1
 # Add additional include paths
-INCLUDES = -I rynx/src -I rynx/external/catch2/ -I rynx/external/stb/
+INCLUDES = -I rynx/src -I rynx/external/catch2/ -I rynx/external/stb/ -I src/
 # General linker settings
 LINK_FLAGS = -lGL -lGLEW -lpthread -lglfw -lportaudio -logg -lvorbis -lvorbisfile
 # Additional release-specific linker settings
