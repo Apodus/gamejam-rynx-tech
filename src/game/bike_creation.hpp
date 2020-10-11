@@ -88,7 +88,7 @@ namespace game {
 		bike_light.color = { 1.0f, 0.6f, 0.2f, 50.0f };
 
 		rynx::components::particle_emitter emitter;
-		emitter.constant_force = { {0, 5, 0}, {0, 20, 0} };
+		emitter.constant_force = { {0, 5, 0}, {0, 10, 0} };
 		emitter.end_radius = { 0.0f, 0.0f };
 		emitter.start_radius = { 5.0f, 8.0f };
 		emitter.initial_angle = { rynx::math::pi - 0.45f, rynx::math::pi + 0.45f };

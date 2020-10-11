@@ -203,7 +203,6 @@ int main(int argc, char** argv) {
 		ruleset_collisionDetection->depends_on(ruleset_motion_updates);
 		ruleset_frustum_culling->depends_on(ruleset_motion_updates);
 		ruleset_hero_inputs->depends_on(ruleset_motion_updates);
-		ruleset_collisionDetection->depends_on(ruleset_hero_inputs);
 	}
 	
 	gameInput.generateAndBindGameKey(gameInput.getMouseKeyPhysical(0), "menuCursorActivation");
@@ -212,12 +211,20 @@ int main(int argc, char** argv) {
 	std::atomic<bool> dead_lock_detector_keepalive = true;
 	std::thread dead_lock_detector([&]() {
 		size_t prev_tick = 994839589;
+		bool detector_triggered = false;
 		std::this_thread::sleep_for(std::chrono::milliseconds(1000));
 		while (dead_lock_detector_keepalive) {
-			if (prev_tick == tickCounter && dead_lock_detector_keepalive) {
-				scheduler.dump();
-				return;
+			if (!detector_triggered) {
+				if (prev_tick == tickCounter) {
+					scheduler.dump();
+					detector_triggered = true;
+				}
 			}
+			else if (prev_tick != tickCounter) {
+				detector_triggered = false;
+				std::cout << "Frame complete" << std::endl << std::endl;
+			}
+
 			prev_tick = tickCounter;
 			std::this_thread::sleep_for(std::chrono::milliseconds(1000));
 		}
