@@ -101,7 +101,7 @@ namespace game {
 			rynx::matrix4(),
 			rynx::components::radius(radius),
 			rynx::components::color({ 0.2f, 1.0f, 0.3f, 1.0f }),
-			rynx::components::physical_body(std::numeric_limits<float>::max(), std::numeric_limits<float>::max(), 0.0f, 1.0f),
+			rynx::components::physical_body().mass(std::numeric_limits<float>::max()).friction(1.0f).elasticity(0.0f).moment_of_inertia(std::numeric_limits<float>::max()),
 			rynx::components::ignore_gravity(),
 			rynx::components::dampening{ 0.50f, 1.0f }
 		);

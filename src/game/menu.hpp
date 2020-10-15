@@ -24,7 +24,7 @@ inline void plop(
 	std::vector<rynx::mesh*> mesh_vec;
 
 	auto addMesh = [&](std::string name, rynx::polygon poly) {
-		auto* mesh_p = meshes.create(name, rynx::polygon_triangulation().generate_polygon_boundary(poly, textures.textureLimits("Empty")), "Empty");
+		auto* mesh_p = meshes.create(name, rynx::polygon_triangulation().make_boundary_mesh(poly, textures.textureLimits("Empty")), "Empty");
 		poly_vec.emplace_back(poly);
 		mesh_vec.emplace_back(mesh_p);
 	};
@@ -45,7 +45,7 @@ inline void plop(
 			rynx::components::radius(radius),
 			rynx::components::color({ 0.2f, 1.0f, 0.3f, 1.0f }),
 			rynx::components::motion({ 0, 0, 0 }, 0),
-			rynx::components::physical_body(500, 500 * 500, 0.0f, 1.0f),
+			rynx::components::physical_body().mass(500).friction(1.0f).elasticity(0.0f).moment_of_inertia(poly),
 			rynx::components::ignore_gravity(),
 			rynx::components::dampening{ 0.50f, 0.50f }
 		);

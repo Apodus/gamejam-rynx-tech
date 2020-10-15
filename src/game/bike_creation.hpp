@@ -20,7 +20,7 @@ namespace game {
 		auto poly = rynx::Shape::makeBox(15.0f);
 
 		{
-			auto mesh = rynx::polygon_triangulation().generate_polygon_boundary(poly, textures.textureLimits("Empty"), 3.0f);
+			auto mesh = rynx::polygon_triangulation().make_boundary_mesh(poly, textures.textureLimits("Empty"), 3.0f);
 			mesh->build();
 			meshes.create("hero_mesh", std::move(mesh), "Empty");
 		}
@@ -47,10 +47,12 @@ namespace game {
 			rynx::components::radius(radius * head_radius_scale),
 			rynx::components::color({ 1.0f, 1.0f, 1.0f, 1.0f }),
 			rynx::components::motion({ 0, 0, 0 }, 0),
-			rynx::components::physical_body(150, 15000, 0.0f, 1.0f),
+			rynx::components::physical_body().mass(150).elasticity(0.0f).friction(1.0f).moment_of_inertia(poly),
 			rynx::components::dampening{ 0.05f, 0.05f },
 			rynx::components::collision_custom_reaction{}
 		);
+
+		auto wheel_shape = rynx::Shape::makeCircle(radius * wheel_radius_scale, 50);
 
 		auto back_wheel_id = ecs.create(
 			rynx::components::position(pos + rynx::vec3f(-22, -40, 0), angle),
@@ -60,7 +62,7 @@ namespace game {
 			rynx::components::radius(radius * wheel_radius_scale),
 			rynx::components::color({ 1.0f, 1.0f, 1.0f, 1.0f }),
 			rynx::components::motion({ 0, 0, 0 }, -10),
-			rynx::components::physical_body(50, 4000, 0.0f, 30.0f),
+			rynx::components::physical_body().mass(50).elasticity(0.0f).friction(30.0f).moment_of_inertia(wheel_shape),
 			rynx::components::dampening{ 0.05f, 0.05f },
 			rynx::components::collision_custom_reaction()
 		);
@@ -73,7 +75,7 @@ namespace game {
 			rynx::components::radius(radius * wheel_radius_scale),
 			rynx::components::color({ 1.0f, 1.0f, 1.0f, 1.0f }),
 			rynx::components::motion({ 0, 0, 0 }, 0),
-			rynx::components::physical_body(50, 4000, 0.0f, 10.0f),
+			rynx::components::physical_body().mass(50).elasticity(0.0f).friction(10.0f).moment_of_inertia(wheel_shape),
 			rynx::components::dampening{ 0.05f, 0.05f },
 			rynx::components::collision_custom_reaction()
 		);
@@ -112,7 +114,7 @@ namespace game {
 			rynx::components::radius(radius * 3.3f),
 			rynx::components::color({ 1.0f, 1.0f, 1.0f, 1.0f }),
 			rynx::components::motion({ 0, 0, 0 }, 0),
-			rynx::components::physical_body(250, 45000, 0.0f, 1.0f),
+			rynx::components::physical_body().mass(650).elasticity(0.0f).friction(1.0f).moment_of_inertia(poly),
 			rynx::components::dampening{ 0.05f, 0.05f }
 		);
 
@@ -131,11 +133,9 @@ namespace game {
 		};
 
 		constexpr float fix_velocity = 0.55f;
-		constexpr float frontback_joints_strength = 0.03f;
-		constexpr float bike_joints_strength = 0.0805f;
+		constexpr float frontback_joints_strength = 0.04f;
+		constexpr float bike_joints_strength = 0.1005f;
 		constexpr float front_wheel_joint_mul = 0.75f;
-
-
 
 		ecs.attachToEntity(connect_wheel_to_body(back_wheel_id, bike_body_id, frontback_joints_strength, 3.0f, fix_velocity, { -45, +13, 0 }), game::components::suspension());
 		ecs.attachToEntity(connect_wheel_to_body(back_wheel_id, bike_body_id, frontback_joints_strength, 3.0f, fix_velocity, { +15, -25, 0 }), game::components::suspension());

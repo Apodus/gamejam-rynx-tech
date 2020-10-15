@@ -207,29 +207,6 @@ int main(int argc, char** argv) {
 	
 	gameInput.generateAndBindGameKey(gameInput.getMouseKeyPhysical(0), "menuCursorActivation");
 
-	std::atomic<size_t> tickCounter = 0;
-	std::atomic<bool> dead_lock_detector_keepalive = true;
-	std::thread dead_lock_detector([&]() {
-		size_t prev_tick = 994839589;
-		bool detector_triggered = false;
-		std::this_thread::sleep_for(std::chrono::milliseconds(1000));
-		while (dead_lock_detector_keepalive) {
-			if (!detector_triggered) {
-				if (prev_tick == tickCounter) {
-					scheduler.dump();
-					detector_triggered = true;
-				}
-			}
-			else if (prev_tick != tickCounter) {
-				detector_triggered = false;
-				std::cout << "Frame complete" << std::endl << std::endl;
-			}
-
-			prev_tick = tickCounter;
-			std::this_thread::sleep_for(std::chrono::milliseconds(1000));
-		}
-	});
-
 	rynx::graphics::screenspace_draws(); // initialize gpu buffers for screenspace ops.
 	rynx::application::renderer render(application, camera);
 	
@@ -270,7 +247,7 @@ int main(int argc, char** argv) {
 	p.vertices = path_points;
 	p.generateBoundary_Outside(1.0f);
 
-	auto mesh_p = meshes->create("spline", rynx::polygon_triangulation().generate_polygon_boundary(p, application.textures()->textureLimits("Empty")), "Empty");
+	auto mesh_p = meshes->create("spline", rynx::polygon_triangulation().make_boundary_mesh(p, application.textures()->textureLimits("Empty")), "Empty");
 
 	ecs.create(
 		rynx::components::position({}, 0.0f),
@@ -326,7 +303,6 @@ int main(int argc, char** argv) {
 			base_simulation.generate_tasks(dt);
 			scheduler.start_frame();
 			scheduler.wait_until_complete();
-			++tickCounter;
 		}
 
 		menu.logic_tick(dt, application.aspectRatio(), gameInput);
@@ -408,7 +384,5 @@ int main(int argc, char** argv) {
 		logic_fps.observe_value(1.0f / dt);
 	}
 
-	dead_lock_detector_keepalive = false;
-	dead_lock_detector.join();
 	return 0;
 }
