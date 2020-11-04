@@ -95,8 +95,13 @@ int main(int argc, char** argv) {
 	rynx::this_thread::rynx_thread_raii rynx_thread_services_required_token;
 
 	rynx::application::Application application;
+	
+	std::cout << "opening window.." << std::endl;
 	application.openWindow(1920, 1080);
+	
+	std::cout << "loading textures.." << std::endl;
 	application.loadTextures("../textures/textures.txt");
+	
 	application.meshRenderer().loadDefaultMesh("Empty");
 
 	auto meshes = application.meshRenderer().meshes();
@@ -136,7 +141,17 @@ int main(int argc, char** argv) {
 	rynx::mapped_input gameInput(application.input());
 
 	GameMenu menu(application.textures());
-	
+
+	if constexpr(false)
+	{
+		auto editor_top = std::make_shared<rynx::menu::Div>(rynx::vec3f{ 0.5f, 1.0f, 0.0f });
+		editor_top->alignToInnerEdge(menu.root_node(), rynx::menu::Align::RIGHT);
+		auto button_create_polygon = std::make_shared<rynx::menu::Button>(*application.textures(), "Frame", rynx::vec3f(1.0f, 1.0f, 0.0f));
+		editor_top->addChild(button_create_polygon);
+		menu.add_child(editor_top);
+		button_create_polygon->onClick([this_ptr = button_create_polygon.get()]() {this_ptr->position_local({-1.0f, 0.0f, 0.0f}); });
+	}
+
 	std::unique_ptr<rynx::collision_detection> detection = std::make_unique<rynx::collision_detection>();
 	
 	rynx::sound::audio_system audio;
@@ -188,28 +203,47 @@ int main(int argc, char** argv) {
 	
 	const auto [back_wheel_id, front_wheel_id, head_id, bike_body_id, hand_joint_id] = game::construct_player(ecs, *application.textures(), gameCollisionsSetup.category_dynamic(), *meshes, { -100, 0, 0 });
 	
+	std::cerr << "back wheel id: " << back_wheel_id << std::endl;
+	std::cerr << "front wheel id: " << front_wheel_id << std::endl;
+
+	auto state_id_physics = base_simulation.m_context->access_state().generate_state_id();
+	auto state_id_user_controls = base_simulation.m_context->access_state().generate_state_id();
+	auto state_id_update_frustum_culling = base_simulation.m_context->access_state().generate_state_id();
+	auto state_id_render = base_simulation.m_context->access_state().generate_state_id();
+	rynx::binary_config::id editorstate = base_simulation.m_context->access_state().generate_state_id();
+
+	rynx::binary_config::id gamestate;
+
+	{
+		gamestate.include_id(state_id_physics);
+		gamestate.include_id(state_id_user_controls);
+	}
+
 	// setup game logic
 	{
-		auto ruleset_hero_inputs = base_simulation.create_rule_set<game::hero_control>(gameInput, back_wheel_id, front_wheel_id, head_id, bike_body_id, hand_joint_id);
-		auto ruleset_collisionDetection = base_simulation.create_rule_set<rynx::ruleset::physics_2d>();
-		auto ruleset_particle_update = base_simulation.create_rule_set<rynx::ruleset::particle_system>();
-		auto ruleset_frustum_culling = base_simulation.create_rule_set<rynx::ruleset::frustum_culling>(camera);
-		auto ruleset_motion_updates = base_simulation.create_rule_set<rynx::ruleset::motion_updates>(rynx::vec3<float>(0, -160.8f, 0));
-		auto ruleset_physical_springs = base_simulation.create_rule_set<rynx::ruleset::physics::springs>();
-		auto ruleset_lifetime_updates = base_simulation.create_rule_set<rynx::ruleset::lifetime_updates>();
-		auto ruleset_debug_input = base_simulation.create_rule_set<debug_input>(gameInput);
+		auto ruleset_hero_inputs = base_simulation.rule_set(state_id_user_controls).create<game::hero_control>(gameInput, back_wheel_id, front_wheel_id, head_id, bike_body_id, hand_joint_id);
+		auto ruleset_collisionDetection = base_simulation.rule_set(state_id_physics).create<rynx::ruleset::physics_2d>();
+		auto ruleset_motion_updates = base_simulation.rule_set(state_id_physics).create<rynx::ruleset::motion_updates>(rynx::vec3<float>(0, -160.8f, 0));
+		auto ruleset_physical_springs = base_simulation.rule_set(state_id_physics).create<rynx::ruleset::physics::springs>();
+		auto ruleset_lifetime_updates = base_simulation.rule_set(state_id_physics).create<rynx::ruleset::lifetime_updates>();
+		auto ruleset_particle_update = base_simulation.rule_set(state_id_physics).create<rynx::ruleset::particle_system>();
+		auto ruleset_frustum_culling = base_simulation.rule_set(state_id_update_frustum_culling).create<rynx::ruleset::frustum_culling>(camera);
+		auto ruleset_editor_rules = base_simulation.rule_set(editorstate).create<editor_rules>(gameInput, gameCollisionsSetup.category_dynamic(), gameCollisionsSetup.category_static(), gamestate, editorstate);
+		auto ruleset_debug_input = base_simulation.rule_set().create<debug_input>(gameInput, gamestate, editorstate, state_id_update_frustum_culling);
 
 		ruleset_physical_springs->depends_on(ruleset_motion_updates);
 		ruleset_collisionDetection->depends_on(ruleset_motion_updates);
 		ruleset_frustum_culling->depends_on(ruleset_motion_updates);
 		ruleset_hero_inputs->depends_on(ruleset_motion_updates);
 	}
-	
+
 	gameInput.generateAndBindGameKey(gameInput.getMouseKeyPhysical(0), "menuCursorActivation");
 
 	rynx::graphics::screenspace_draws(); // initialize gpu buffers for screenspace ops.
 	rynx::application::renderer render(application, camera);
-	
+
+	editorstate.disable();
+	render.debug_draw_binary_config(editorstate);
 	render.set_lights_resolution(1.0f, 1.0f); // reduce pixels to make shit look bad
 	render.light_global_ambient({ 1.0f, 1.0f, 1.0f, 0.25f });
 	render.light_global_directed({ 1.0f, 1.0f, 1.0f, 0.0f }, { 1, 0 ,0 });
@@ -224,7 +258,7 @@ int main(int argc, char** argv) {
 	rynx::timer frame_timer_dt;
 	float dt = 1.0f / 120.0f;
 	
-	game::create_terrain(base_simulation.m_ecs, *meshes, *application.textures(), "Empty", gameCollisionsSetup.category_static());
+	std::cerr << "Terrain id: " << game::create_terrain(base_simulation.m_ecs, *meshes, *application.textures(), "Empty", gameCollisionsSetup.category_static()).value;
 
 	auto marker_id = ecs.create(
 		rynx::components::position({0.0f, -55.0f, 0.0f}, 0),
@@ -346,6 +380,28 @@ int main(int argc, char** argv) {
 
 				std::string render_fps_text = "render fps: " + std::to_string(int(100 * render_fps.avg()) / 100.0f);
 				application.textRenderer().drawText(render_fps_text, -0.9f, +0.8f / application.aspectRatio(), 0.1f, Color::GREEN, rynx::TextRenderer::Align::Left, menu.fontConsola);
+
+				bool front_wheel_touching_terrain = false;
+				bool back_wheel_touching_terrain = false;
+				ecs.query().for_each([&](rynx::ecs::id id, rynx::components::collision_custom_reaction& cols) {
+					if (id == front_wheel_id) {
+						for (auto& col : cols.events) {
+							if (col.id == 15) {
+								front_wheel_touching_terrain = true;
+							}
+						}
+					}
+					if (id == back_wheel_id) {
+						for (auto& col : cols.events) {
+							if (col.id == 15) {
+								back_wheel_touching_terrain = true;
+							}
+						}
+					}
+				});
+
+				application.textRenderer().drawText("BW", -0.9f, +0.7f / application.aspectRatio(), 0.1f, back_wheel_touching_terrain ? Color::GREEN : Color::RED, rynx::TextRenderer::Align::Left, menu.fontConsola);
+				application.textRenderer().drawText("FW", -0.7f, +0.7f / application.aspectRatio(), 0.1f, front_wheel_touching_terrain ? Color::GREEN : Color::RED, rynx::TextRenderer::Align::Left, menu.fontConsola);
 
 				// present result of previous frame.
 				application.swapBuffers();

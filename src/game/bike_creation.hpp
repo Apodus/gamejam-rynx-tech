@@ -99,7 +99,7 @@ namespace game {
 		emitter.position_offset = { -30.0f, 0.0f, 0.0f };
 		emitter.lifetime_range = { 0.2f, 0.6f };
 		emitter.rotate_with_host = true;
-		emitter.spawn_rate = { 0.01f, 0.02f };
+		emitter.spawn_rate = { 10.0f, 20.0f };
 		emitter.start_color = { {0.2f, 0.2f, 0.2f, 0.5f}, {0.4f, 0.4f, 0.4f, 0.5f} };
 		emitter.end_color = { {0.8f, 0.8f, 0.8f, 0.0f}, {0.9f, 0.9f, 0.9f, 0.0f} };
 		emitter.time_until_next_spawn = 0.0f;

@@ -14,76 +14,126 @@
 #include <rynx/graphics/text/fontdata/consolamono.hpp>
 #include <rynx/graphics/text/fontdata/lenka.hpp>
 
-inline void plop(
-	rynx::ecs& ecs,
-	rynx::mesh_collection& meshes,
-	rynx::graphics::GPUTextures& textures,
-	rynx::collision_detection::category_id dynamicCategory) {
+#include <rynx/math/geometry/ray.hpp>
+#include <rynx/math/geometry/plane.hpp>
 
-	std::vector<rynx::polygon> poly_vec;
-	std::vector<rynx::mesh*> mesh_vec;
+class editor_rules : public rynx::application::logic::iruleset {
+	rynx::binary_config::id m_editor_state;
+	rynx::binary_config::id m_game_state;
 
-	auto addMesh = [&](std::string name, rynx::polygon poly) {
-		auto* mesh_p = meshes.create(name, rynx::polygon_triangulation().make_boundary_mesh(poly, textures.textureLimits("Empty")), "Empty");
-		poly_vec.emplace_back(poly);
-		mesh_vec.emplace_back(mesh_p);
+	rynx::key::logical key_createPolygon;
+	rynx::key::logical key_createBox;
+
+	int32_t m_selected_vertex = 0;
+	
+	struct edited_entity {
+		rynx::ecs::id m_id;
+		rynx::floats4 m_original_color;
 	};
 
-	addMesh("pentagon_building", rynx::Shape::makeCircle(28, 5));
-	addMesh("box_building", rynx::Shape::makeCircle(20, 4));
-	addMesh("triangle_building", rynx::Shape::makeCircle(35, 3));
-	addMesh("block_building", rynx::Shape::makeRectangle(20, 40));
+	edited_entity m_selected_entity;
 
-	auto makeBox_outside = [&](rynx::polygon& poly, rynx::mesh* mesh, rynx::vec3<float> pos, float angle) {
-		float radius = poly.radius();
-		return ecs.create(
-			rynx::components::position(pos, angle),
-			rynx::components::collisions{ dynamicCategory.value },
-			rynx::components::boundary({ poly.generateBoundary_Outside(1.0f) }, pos, angle),
-			rynx::components::mesh(mesh),
-			rynx::matrix4(),
-			rynx::components::radius(radius),
-			rynx::components::color({ 0.2f, 1.0f, 0.3f, 1.0f }),
-			rynx::components::motion({ 0, 0, 0 }, 0),
-			rynx::components::physical_body().mass(500).friction(1.0f).elasticity(0.0f).moment_of_inertia(poly),
-			rynx::components::ignore_gravity(),
-			rynx::components::dampening{ 0.50f, 0.50f }
-		);
-	};
+	bool dragging_polygon_vertex = false;
 
-	for (int a = 0; a < 100; ++a) {
-		float x = 10 * a * std::sin(a * 0.5f);
-		float y = 10 * a * std::cos(a * 0.5f);
-		makeBox_outside(poly_vec[a & 3], mesh_vec[a & 3], {x, y, 0}, a * 4.7f);
+	rynx::collision_detection::category_id m_static_collisions;
+	rynx::collision_detection::category_id m_dynamic_collisions;
+public:
+	editor_rules(rynx::mapped_input& gameInput, rynx::collision_detection::category_id dynamic_collisions, rynx::collision_detection::category_id static_collisions, rynx::binary_config::id game_state, rynx::binary_config::id editor_state) {
+		key_createPolygon = gameInput.generateAndBindGameKey({ 'P' }, "Create polygon");
+		key_createBox = gameInput.generateAndBindGameKey({ 'O' }, "Create box");
+
+		m_editor_state = editor_state;
+		m_game_state = game_state;
+		m_static_collisions = static_collisions;
+		m_dynamic_collisions = dynamic_collisions;
 	}
-}
+
+private:
+	virtual void onFrameProcess(rynx::scheduler::context& context, float dt) override {
+		context.add_task("editor tick", [this, dt](
+			rynx::ecs& game_ecs,
+			rynx::mapped_input& gameInput,
+			rynx::camera& gameCamera)
+			{
+				auto mouseRay = gameInput.mouseRay(gameCamera);
+				auto mouse_z_plane = mouseRay.intersect(rynx::plane(0, 0, 1, 0));
+				mouse_z_plane.first.z = 0;
+
+				if (mouse_z_plane.second) {
+					if (gameInput.isKeyClicked(key_createPolygon)) {
+						auto p = rynx::Shape::makeTriangle(50.0f);
+						game_ecs.create(
+							rynx::components::position(mouse_z_plane.first, 0.0f),
+							rynx::components::collisions{ m_static_collisions.value },
+							rynx::components::boundary({ p.generateBoundary_Outside(1.0f) }, mouse_z_plane.first, 0.0f),
+							rynx::components::radius(p.radius()),
+							rynx::components::color({ 0.2f, 1.0f, 0.3f, 1.0f }),
+							rynx::components::physical_body().mass(std::numeric_limits<float>::max()).friction(1.0f).elasticity(0.0f).moment_of_inertia(std::numeric_limits<float>::max()),
+							rynx::components::ignore_gravity(),
+							rynx::components::dampening{ 0.50f, 1.0f }
+						);
+					}
+
+					if (gameInput.isKeyClicked(key_createBox)) {
+						auto p = rynx::Shape::makeBox(20.0f);
+						game_ecs.create(
+							rynx::components::position(mouse_z_plane.first, 0.0f),
+							rynx::components::motion{},
+							rynx::components::collisions{ m_dynamic_collisions.value },
+							rynx::components::boundary({ p.generateBoundary_Outside(1.0f) }, mouse_z_plane.first, 0.0f),
+							rynx::components::radius(p.radius()),
+							rynx::components::color({ 0.2f, 1.0f, 0.3f, 1.0f }),
+							rynx::components::physical_body().mass(550.0f).friction(1.0f).elasticity(0.0f).moment_of_inertia(p, 2.0f),
+							rynx::matrix4{}
+						);
+					}
+				}
+			});
+	}
+};
 
 class debug_input : public rynx::application::logic::iruleset {
-	int32_t zoomOut;
-	int32_t zoomIn;
+	rynx::key::logical zoomOut;
+	rynx::key::logical zoomIn;
 
-	int32_t camera_orientation_key;
-	int32_t cameraUp;
-	int32_t cameraLeft;
-	int32_t cameraRight;
-	int32_t cameraDown;
+	rynx::key::logical camera_orientation_key;
+	rynx::key::logical cameraUp;
+	rynx::key::logical cameraLeft;
+	rynx::key::logical cameraRight;
+	rynx::key::logical cameraDown;
 
-	int32_t yawCounterClockWise;
-	int32_t yawClockWise;
+	rynx::key::logical yawCounterClockWise;
+	rynx::key::logical yawClockWise;
+
+	rynx::key::logical key_toggleGameState;
+	rynx::key::logical key_toggleEditorState;
+	rynx::key::logical key_toggleFrustumCullState;
+
+	rynx::binary_config::id m_editor_state;
+	rynx::binary_config::id m_game_state;
+	rynx::binary_config::id m_frustum_cull_state;
 
 public:
-	debug_input(rynx::mapped_input& gameInput) {
+	debug_input(rynx::mapped_input& gameInput, rynx::binary_config::id editor_state, rynx::binary_config::id game_state, rynx::binary_config::id frustum_cull_update_state) {
 		zoomOut = gameInput.generateAndBindGameKey('1', "zoom out");
 		zoomIn = gameInput.generateAndBindGameKey('2', "zoom in");
 
 		camera_orientation_key = gameInput.generateAndBindGameKey(gameInput.getMouseKeyPhysical(1), "camera_orientation");
-		cameraUp = gameInput.generateAndBindGameKey('I', "cameraUp");
-		cameraLeft = gameInput.generateAndBindGameKey('J', "cameraLeft");
-		cameraRight = gameInput.generateAndBindGameKey('L', "cameraRight");
-		cameraDown = gameInput.generateAndBindGameKey('K', "cameraDown");
+		cameraUp = gameInput.generateAndBindGameKey('W', "cameraUp");
+		cameraLeft = gameInput.generateAndBindGameKey('A', "cameraLeft");
+		cameraRight = gameInput.generateAndBindGameKey('D', "cameraRight");
+		cameraDown = gameInput.generateAndBindGameKey('S', "cameraDown");
+
+		key_toggleGameState = gameInput.generateAndBindGameKey('1', "stateGame");
+		key_toggleEditorState = gameInput.generateAndBindGameKey('2', "stateEditor");
+		key_toggleFrustumCullState = gameInput.generateAndBindGameKey('3', "stateFrustum");
 
 		yawCounterClockWise = gameInput.generateAndBindGameKey('Q', "yawCCW");
 		yawClockWise = gameInput.generateAndBindGameKey('E', "yawCW");
+
+		m_editor_state = editor_state;
+		m_game_state = game_state;
+		m_frustum_cull_state = frustum_cull_update_state;
 	}
 
 private:
@@ -106,6 +156,16 @@ private:
 				const float camera_translate_multiplier = 200.4f * dt;
 				const float camera_zoom_multiplier = (1.0f - dt * 3.0f);
 				
+				if (gameInput.isKeyReleased(key_toggleEditorState)) {
+					m_editor_state.toggle();
+				}
+				if (gameInput.isKeyReleased(key_toggleGameState)) {
+					m_game_state.toggle();
+				}
+				if (gameInput.isKeyReleased(key_toggleFrustumCullState)) {
+					m_frustum_cull_state.toggle();
+				}
+
 				if (gameInput.isKeyDown(cameraUp)) { gameCamera.translate(gameCamera.local_forward() * camera_translate_multiplier); }
 				if (gameInput.isKeyDown(cameraDown)) { gameCamera.translate(-gameCamera.local_forward() * camera_translate_multiplier); }
 				if (gameInput.isKeyDown(cameraLeft)) { gameCamera.translate(gameCamera.local_left() * camera_translate_multiplier); }
@@ -169,7 +229,6 @@ public:
 		auto sampleButton = std::make_shared<rynx::menu::Button>(
 			*textures,
 			"Frame",
-			&root,
 			rynx::vec3<float>(0.4f, 0.1f, 0),
 			rynx::vec3<float>(),
 			0.14f
@@ -234,6 +293,14 @@ public:
 		root.addChild(sampleSlider);
 		root.addChild(megaSlider);
 		*/
+	}
+
+	rynx::menu::Component* root_node() {
+		return &root;
+	}
+
+	GameMenu& add_child(std::shared_ptr<rynx::menu::Component> child) {
+		root.addChild(std::move(child));
 	}
 
 

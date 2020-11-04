@@ -19,7 +19,14 @@ namespace game {
 	}
 }
 
-game::hero_control::hero_control(rynx::mapped_input& input, rynx::ecs::id back_wheel, rynx::ecs::id front_wheel, rynx::ecs::id head, rynx::ecs::id bike_body, rynx::ecs::id hand_joint_id) {
+game::hero_control::hero_control(
+	rynx::mapped_input& input,
+	rynx::ecs::id back_wheel,
+	rynx::ecs::id front_wheel,
+	rynx::ecs::id head,
+	rynx::ecs::id bike_body,
+	rynx::ecs::id hand_joint_id)
+{
 	key_walk_forward = input.generateAndBindGameKey('W', "walk forward");
 	key_walk_back = input.generateAndBindGameKey('S', "walk back");
 	key_walk_left = input.generateAndBindGameKey('A', "walk left");
@@ -44,7 +51,7 @@ void game::hero_control::onFrameProcess(rynx::scheduler::context& context, float
 		rynx::scheduler::task& task_context)
 	{
 		constexpr float max_speed = 75;
-		constexpr float max_acceleration = 400;
+		constexpr float max_acceleration = 700;
 
 		auto mouseScreenPos = input.mouseScreenPosition();
 		auto mousecast = camera.ray_cast(mouseScreenPos.x, mouseScreenPos.y).intersect(rynx::plane(0, 0, 1, 0));
