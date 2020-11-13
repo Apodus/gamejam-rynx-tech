@@ -18,6 +18,7 @@ namespace game {
 
 
 		rynx::polygon p;
+		auto editor = p.edit();
 		rynx::polygon terrain_surface;
 		{
 			float x_value = -1000.0f;
@@ -26,26 +27,25 @@ namespace game {
 					250.0f * std::sin(x_value * 0.0017f) +
 					110.0f * std::sin(x_value * 0.0073f) +
 					50.0f * std::sin(x_value * 0.013f) - 100.0f;
-				p.vertices.emplace_back(x_value, y_value, 0.0f);
+				editor.push_back({ x_value, y_value, 0.0f });
 				x_value += 10.0f;
 			}
 
 			terrain_surface = p;
+			terrain_surface.recompute_normals();
 
-			p.vertices.emplace_back(rynx::vec3f{ +5100.0f, -1000.0f, 0.0f });
-			p.vertices.emplace_back(rynx::vec3f{ -600.0f, -1000.0f, 0.0f });
-
-			std::reverse(p.vertices.begin(), p.vertices.end());
+			editor.emplace_back(rynx::vec3f{ +5100.0f, -1000.0f, 0.0f });
+			editor.emplace_back(rynx::vec3f{ -600.0f, -1000.0f, 0.0f });
+			editor.reverse();
 		}
 
 		terrain_surface.scale(1.0f / p.radius());
-		std::vector<rynx::vec3f>& vertices = terrain_surface.vertices;
-
+		
 		std::unique_ptr<rynx::mesh> m = std::make_unique<rynx::mesh>();
 		auto uv_limits = textures.textureLimits(terrainTexture);
 
-		for (int32_t i = 0; i < vertices.size(); ++i) {
-			auto& v = vertices[i];
+		for (int32_t i = 0; i < terrain_surface.size(); ++i) {
+			const auto v = terrain_surface.vertex_position(i);
 			m->vertices.emplace_back(v.x);
 			m->vertices.emplace_back(v.y);
 			m->vertices.emplace_back(v.z);
@@ -54,17 +54,8 @@ namespace game {
 			m->vertices.emplace_back(-1000.0f);
 			m->vertices.emplace_back(v.z);
 
-			auto normal = [&]() {
-				if (i == 0) {
-					return (vertices[1] - vertices[0]).normal2d();
-				}
-				if (i == vertices.size() - 1) {
-					return (vertices[i] - vertices[i - 1]).normal2d();
-				}
-				return (vertices[i + 1] - vertices[i - 1]).normal2d();
-			}();
-			normal.normalize();
-
+			auto normal = terrain_surface.vertex_normal(i);
+			
 			m->normals.emplace_back(normal.x);
 			m->normals.emplace_back(normal.y);
 			m->normals.emplace_back(normal.z);
@@ -92,11 +83,12 @@ namespace game {
 
 		auto* mesh_p = meshes.create(mesh_name, std::move(m), "Empty");
 		float radius = p.radius();
+		p.recompute_normals();
 
 		return ecs.create(
 			rynx::components::position({}, 0.0f),
 			rynx::components::collisions{ terrainCollisionCategory.value },
-			rynx::components::boundary({ p.generateBoundary_Outside(1.0f) }, {}, 0.0f),
+			rynx::components::boundary(p, {}, 0.0f),
 			rynx::components::mesh(mesh_p),
 			rynx::matrix4(),
 			rynx::components::radius(radius),

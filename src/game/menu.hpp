@@ -17,6 +17,313 @@
 #include <rynx/math/geometry/ray.hpp>
 #include <rynx/math/geometry/plane.hpp>
 
+class ieditor_tool {
+public:
+	virtual void update(rynx::scheduler::context& ctx) = 0;
+	virtual void on_tool_selected() = 0;
+	virtual void on_tool_unselected() = 0;
+};
+
+namespace tools {
+	class selection_tool : public ieditor_tool {
+	public:
+		selection_tool(rynx::scheduler::context& ctx) {
+			auto& input = ctx.get_resource<rynx::mapped_input>();
+			m_activation_key = input.generateAndBindGameKey(input.getMouseKeyPhysical(0), "selection tool activate");
+		}
+
+		virtual void update(rynx::scheduler::context& ctx) override {
+			ctx.add_task("editor tick", [this](
+				rynx::ecs& game_ecs,
+				rynx::mapped_input& gameInput,
+				rynx::camera& gameCamera)
+			{
+				if (gameInput.isKeyPressed(m_activation_key) && !gameInput.isKeyConsumed(m_activation_key)) {
+					auto mouseRay = gameInput.mouseRay(gameCamera);
+					auto [mouse_z_plane, hit] = mouseRay.intersect(rynx::plane(0, 0, 1, 0));
+					mouse_z_plane.z = 0;
+
+					if (hit) {
+						on_key_press(game_ecs, mouse_z_plane);
+					}
+				}
+			});
+		}
+
+		rynx::ecs::id selected_entity() const {
+			return m_selected_entity_id;
+		}
+
+		virtual void on_tool_selected() override {
+		}
+
+		virtual void on_tool_unselected() override {
+		}
+
+	private:
+		void on_key_press(rynx::ecs& game_ecs, rynx::vec3f cursorWorldPos) {
+			float best_distance = 1e30f;
+			rynx::ecs::id best_id;
+
+			// find best selection
+			game_ecs.query().for_each([&, mouse_world_pos = cursorWorldPos](rynx::ecs::id id, rynx::components::position pos) {
+				float sqr_dist = (mouse_world_pos - pos.value).length_squared();
+				auto* ptr = game_ecs[id].try_get<rynx::components::boundary>();
+
+				if (sqr_dist < best_distance) {
+					best_distance = sqr_dist;
+					best_id = id;
+				}
+
+				if (ptr) {
+					for (size_t i = 0; i < ptr->segments_world.size(); ++i) {
+						// some threshold for vertex picking
+						const auto vertex = ptr->segments_world.segment(i);
+						auto [dist, shortest_pos] = rynx::math::pointDistanceLineSegmentSquared(vertex.p1, vertex.p2, mouse_world_pos);
+						if (dist < best_distance) {
+							best_distance = dist;
+							best_id = id;
+						}
+					}
+				}
+			});
+
+			// unselect previous selection
+			if (game_ecs.exists(m_selected_entity_id)) {
+				auto* color_ptr = game_ecs[m_selected_entity_id].try_get<rynx::components::color>();
+				if (color_ptr) {
+					color_ptr->value = m_selected_entity_original_color;
+				}
+			}
+
+			// select new selection
+			{
+				auto* color_ptr = game_ecs[best_id].try_get<rynx::components::color>();
+				if (color_ptr) {
+					m_selected_entity_original_color = color_ptr->value;
+					color_ptr->value = rynx::floats4{ 1.0f, 0.0f, 0.0f, 1.0f };
+				}
+
+				m_selected_entity_id = best_id;
+				std::cerr << "entity selection tool picked: " << best_id.value << std::endl;
+			}
+		}
+
+		rynx::ecs::id m_selected_entity_id;
+		rynx::floats4 m_selected_entity_original_color;
+		rynx::key::logical m_activation_key;
+	};
+
+
+	class polygon_tool : public ieditor_tool {
+	public:
+		polygon_tool(rynx::scheduler::context& ctx, selection_tool* selection) {
+			auto& input = ctx.get_resource<rynx::mapped_input>();
+			m_activation_key = input.generateAndBindGameKey(input.getMouseKeyPhysical(0), "polygon tool activate");
+			m_secondary_activation_key = input.generateAndBindGameKey(input.getMouseKeyPhysical(1), "polygon tool activate");
+			m_key_smooth = input.generateAndBindGameKey(',', "polygon smooth op");
+			m_selection_tool = selection;
+		}
+
+		virtual void update(rynx::scheduler::context& ctx) override {
+			ctx.add_task("polygon tool tick", [this](
+				rynx::ecs& game_ecs,
+				rynx::collision_detection& detection,
+				rynx::mapped_input& gameInput,
+				rynx::camera& gameCamera)
+				{
+					auto id = m_selection_tool->selected_entity();
+					if (game_ecs.exists(id)) {
+						auto entity = game_ecs[id];
+						if (entity.has<rynx::components::boundary>()) {
+							auto mouseRay = gameInput.mouseRay(gameCamera);
+							auto [mouse_z_plane, hit] = mouseRay.intersect(rynx::plane(0, 0, 1, 0));
+							mouse_z_plane.z = 0;
+
+							if (gameInput.isKeyPressed(m_activation_key)) {
+								if (hit) {
+									if (!vertex_create(game_ecs, mouse_z_plane)) {
+										m_selected_vertex = vertex_select(game_ecs, mouse_z_plane);
+									}
+									drag_operation_start(game_ecs, mouse_z_plane);
+								}
+							}
+
+							if (gameInput.isKeyPressed(m_secondary_activation_key)) {
+								if (hit) {
+									int32_t vertex_index = vertex_select(game_ecs, mouse_z_plane);
+									if (vertex_index >= 0) {
+										auto& boundary = entity.get<rynx::components::boundary>();
+										auto pos = entity.get<rynx::components::position>();
+										boundary.segments_local.edit().erase(vertex_index);
+										boundary.segments_world = boundary.segments_local;
+										boundary.update_world_positions(pos.value, pos.angle);
+									}
+								}
+							}
+
+							if (gameInput.isKeyDown(m_activation_key)) {
+								drag_operation_update(game_ecs, mouse_z_plane);
+							}
+
+							if (gameInput.isKeyReleased(m_activation_key)) {
+								drag_operation_end(game_ecs, detection);
+							}
+
+							// smooth selected polygon
+							if (gameInput.isKeyClicked(m_key_smooth)) {
+								auto& boundary = entity.get<rynx::components::boundary>();
+								boundary.segments_local.edit().smooth(3);
+								boundary.segments_local.recompute_normals();
+								boundary.segments_world = boundary.segments_local;
+
+								auto pos = entity.get<rynx::components::position>();
+								boundary.update_world_positions(pos.value, pos.angle);
+
+								// TODO: should really also update radius.
+							}
+						}
+					}
+				});
+		}
+
+		virtual void on_tool_selected() override {
+		}
+
+		virtual void on_tool_unselected() override {
+			m_drag_action_active = false;
+			m_selected_vertex = -1;
+		}
+
+	private:
+		bool vertex_create(rynx::ecs& game_ecs, rynx::vec3f cursorWorldPos) {
+			float best_distance = 1e30f;
+			int best_vertex = -1;
+			bool should_create = false;
+
+			// find best selection
+			auto entity = game_ecs[m_selection_tool->selected_entity()];
+			auto radius = entity.get<rynx::components::radius>();
+			auto pos = entity.get<rynx::components::position>();
+			auto& boundary = entity.get<rynx::components::boundary>();
+
+			for (size_t i = 0; i < boundary.segments_world.size(); ++i) {
+				// some threshold for vertex picking
+				const auto vertex = boundary.segments_world.segment(i);
+				
+				if ((vertex.p1 - cursorWorldPos).length_squared() < best_distance) {
+					best_distance = (vertex.p1 - cursorWorldPos).length_squared();
+					best_vertex = int(i);
+					should_create = false;
+				}
+
+				float segment_mid_dist = ((vertex.p1 + vertex.p2) * 0.5f - cursorWorldPos).length_squared();
+				if (segment_mid_dist < best_distance) {
+					best_distance = segment_mid_dist;
+					best_vertex = int(i);
+					should_create = true;
+				}
+			}
+
+			if (should_create) {
+				boundary.segments_local.edit().insert(best_vertex, cursorWorldPos - pos.value);
+				boundary.segments_world = boundary.segments_local;
+				boundary.update_world_positions(pos.value, pos.angle);
+				m_selected_vertex = best_vertex + 1;
+			}
+
+			return should_create;
+		}
+
+		int32_t vertex_select(rynx::ecs& game_ecs, rynx::vec3f cursorWorldPos) {
+			float best_distance = 1e30f;
+			int best_vertex = -1;
+			
+			// find best selection
+			auto entity = game_ecs[m_selection_tool->selected_entity()];
+			auto radius = entity.get<rynx::components::radius>();
+			auto pos = entity.get<rynx::components::position>();
+			const auto& boundary = entity.get<rynx::components::boundary>();
+	
+			for (size_t i = 0; i < boundary.segments_world.size(); ++i) {
+				// some threshold for vertex picking
+				const auto vertex = boundary.segments_world.segment(i);
+				float limit = (best_vertex == -1) ? 15.0f * 15.0f : best_distance;
+				if ((vertex.p1 - cursorWorldPos).length_squared() < limit) {
+					best_distance = (vertex.p1 - cursorWorldPos).length_squared();
+					best_vertex = int(i);
+				}
+			}
+
+			return best_vertex;
+		}
+
+		void drag_operation_start(rynx::ecs& game_ecs, rynx::vec3f cursorWorldPos) {
+			m_drag_action_mouse_origin = cursorWorldPos;
+			if (m_selected_vertex != -1) {
+				auto& boundary = game_ecs[m_selection_tool->selected_entity()].get<rynx::components::boundary>();
+				m_drag_action_object_origin = boundary.segments_local.vertex_position(m_selected_vertex);
+			}
+			else {
+				m_drag_action_object_origin = game_ecs[m_selection_tool->selected_entity()].get<rynx::components::position>().value;
+			}
+		}
+
+		void drag_operation_update(rynx::ecs& game_ecs, rynx::vec3f cursorWorldPos) {
+			if (m_drag_action_active || (cursorWorldPos - m_drag_action_mouse_origin).length_squared() > 10.0f * 10.0f) {
+				m_drag_action_active = true;
+				auto entity = game_ecs[m_selection_tool->selected_entity()];
+				auto& entity_pos = entity.get<rynx::components::position>();
+				rynx::vec3f position_delta = cursorWorldPos - m_drag_action_mouse_origin;
+				
+				if (m_selected_vertex != -1) {
+					auto& boundary = entity.get<rynx::components::boundary>();
+					auto editor = boundary.segments_local.edit();
+					editor.vertex(m_selected_vertex).position(m_drag_action_object_origin + position_delta);
+
+					// todo: just update the edited parts
+					boundary.update_world_positions(entity_pos.value, entity_pos.angle);
+				}
+				else {
+					entity_pos.value = m_drag_action_object_origin + position_delta;
+				}
+			}
+		}
+
+		void drag_operation_end(rynx::ecs& game_ecs, rynx::collision_detection& detection) {
+			if (m_drag_action_active) {
+				auto entity = game_ecs[m_selection_tool->selected_entity()];
+				auto& entity_pos = entity.get<rynx::components::position>();
+				auto& boundary = entity.get<rynx::components::boundary>();
+
+				{
+					auto editor = boundary.segments_local.edit();
+					auto bounding_sphere = boundary.segments_local.bounding_sphere();
+					editor.translate(-bounding_sphere.first);
+					entity_pos.value += bounding_sphere.first;
+				}
+				
+				entity.get<rynx::components::radius>().r = boundary.segments_local.radius();
+				boundary.update_world_positions(entity_pos.value, entity_pos.angle);
+				detection.update_entity_forced(game_ecs, entity.id());
+			}
+
+			m_drag_action_active = false;
+		}
+
+		selection_tool* m_selection_tool = nullptr;
+		int32_t m_selected_vertex = -1; // -1 is none, otherwise this is an index to polygon vertex array.
+		rynx::key::logical m_activation_key;
+		rynx::key::logical m_secondary_activation_key;
+
+		rynx::key::logical m_key_smooth;
+
+		rynx::vec3f m_drag_action_mouse_origin;
+		rynx::vec3f m_drag_action_object_origin;
+		bool m_drag_action_active = false;
+	};
+}
+
 class editor_rules : public rynx::application::logic::iruleset {
 	rynx::binary_config::id m_editor_state;
 	rynx::binary_config::id m_game_state;
@@ -24,23 +331,76 @@ class editor_rules : public rynx::application::logic::iruleset {
 	rynx::key::logical key_createPolygon;
 	rynx::key::logical key_createBox;
 
-	int32_t m_selected_vertex = 0;
-	
-	struct edited_entity {
-		rynx::ecs::id m_id;
-		rynx::floats4 m_original_color;
-	};
-
-	edited_entity m_selected_entity;
-
-	bool dragging_polygon_vertex = false;
+	rynx::key::logical key_selection_tool;
+	rynx::key::logical key_polygon_tool;
 
 	rynx::collision_detection::category_id m_static_collisions;
 	rynx::collision_detection::category_id m_dynamic_collisions;
+
+	std::shared_ptr<rynx::menu::Div> m_editor_menu;
+	
+	tools::selection_tool m_selection_tool;
+	tools::polygon_tool m_polygon_tool;
+	
+	ieditor_tool* m_active_tool;
+
 public:
-	editor_rules(rynx::mapped_input& gameInput, rynx::collision_detection::category_id dynamic_collisions, rynx::collision_detection::category_id static_collisions, rynx::binary_config::id game_state, rynx::binary_config::id editor_state) {
+	editor_rules(
+		rynx::scheduler::context& ctx,
+		std::shared_ptr<rynx::menu::Div> editor_menu,
+		rynx::graphics::GPUTextures& textures,
+		rynx::mapped_input& gameInput,
+		rynx::collision_detection::category_id dynamic_collisions,
+		rynx::collision_detection::category_id static_collisions,
+		rynx::binary_config::id game_state,
+		rynx::binary_config::id editor_state)
+	: m_editor_menu(editor_menu)
+	, m_selection_tool(ctx)
+	, m_polygon_tool(ctx, &m_selection_tool)
+	{
+		// create editor menus
+		{
+			// m_editor_menu->alignToInnerEdge(rynx::menu::Align::RIGHT, +0.9f);
+			auto editor_tools_side_bar = std::make_shared<rynx::menu::Div>(rynx::vec3f{0.3f, 1.0f, 0.0f});
+			editor_tools_side_bar->align().right_inside().offset(+0.9f);
+			editor_tools_side_bar->on_hover([ptr = editor_tools_side_bar.get()](rynx::vec3f mousePos, bool inRect) {
+				if (inRect) {
+					ptr->align().offset(0.0f);
+				}
+				else {
+					ptr->align().offset(+0.9f);
+				}
+				return inRect;
+			});
+
+			m_editor_menu->addChild(editor_tools_side_bar);
+			
+			auto side_bar_frame = std::make_shared<rynx::menu::Frame>(textures, "Frame");
+			editor_tools_side_bar->addChild(side_bar_frame);
+
+			auto selection_tool_button = std::make_shared<rynx::menu::Button>(textures, "Frame", rynx::vec3f(0.15f, 0.15f * 0.3f, 0.0f));
+			selection_tool_button->respect_aspect_ratio();
+			selection_tool_button->align().target(editor_tools_side_bar.get()).top_left_inside().offset(-0.3f);
+			// selection_tool_button->text("hehe");
+			selection_tool_button->on_click([this]() { switch_to_tool(m_selection_tool); });
+			editor_tools_side_bar->addChild(selection_tool_button);
+			
+			auto polygon_tool_button = std::make_shared<rynx::menu::Button>(textures, "Frame", rynx::vec3f(0.15f, 0.15f * 0.3f, 0.0f));
+			polygon_tool_button->align().target(selection_tool_button.get()).right_outside().offset_x(0.3f).top_inside();
+			polygon_tool_button->respect_aspect_ratio();
+			// polygon_tool_button->text("boo");
+			polygon_tool_button->on_click([this]() { switch_to_tool(m_polygon_tool); });
+			editor_tools_side_bar->addChild(polygon_tool_button);
+		}
+
+		m_active_tool = &m_selection_tool;
+		m_active_tool->on_tool_selected();
+
 		key_createPolygon = gameInput.generateAndBindGameKey({ 'P' }, "Create polygon");
 		key_createBox = gameInput.generateAndBindGameKey({ 'O' }, "Create box");
+		
+		key_selection_tool = gameInput.generateAndBindGameKey('_', "selection tool");
+		key_polygon_tool = gameInput.generateAndBindGameKey('.', "polygon tool");
 
 		m_editor_state = editor_state;
 		m_game_state = game_state;
@@ -48,24 +408,41 @@ public:
 		m_dynamic_collisions = dynamic_collisions;
 	}
 
+	void switch_to_tool(ieditor_tool& tool) {
+		m_active_tool->on_tool_unselected();
+		tool.on_tool_selected();
+		m_active_tool = &tool;
+	}
+
 private:
 	virtual void onFrameProcess(rynx::scheduler::context& context, float dt) override {
+		
+		m_active_tool->update(context);
+
 		context.add_task("editor tick", [this, dt](
 			rynx::ecs& game_ecs,
 			rynx::mapped_input& gameInput,
 			rynx::camera& gameCamera)
 			{
+				if (gameInput.isKeyClicked(key_selection_tool)) {
+					switch_to_tool(m_selection_tool);
+				}
+				if (gameInput.isKeyClicked(key_polygon_tool)) {
+					switch_to_tool(m_polygon_tool);
+				}
+
 				auto mouseRay = gameInput.mouseRay(gameCamera);
 				auto mouse_z_plane = mouseRay.intersect(rynx::plane(0, 0, 1, 0));
 				mouse_z_plane.first.z = 0;
 
 				if (mouse_z_plane.second) {
+					
 					if (gameInput.isKeyClicked(key_createPolygon)) {
 						auto p = rynx::Shape::makeTriangle(50.0f);
 						game_ecs.create(
 							rynx::components::position(mouse_z_plane.first, 0.0f),
 							rynx::components::collisions{ m_static_collisions.value },
-							rynx::components::boundary({ p.generateBoundary_Outside(1.0f) }, mouse_z_plane.first, 0.0f),
+							rynx::components::boundary(p, mouse_z_plane.first, 0.0f),
 							rynx::components::radius(p.radius()),
 							rynx::components::color({ 0.2f, 1.0f, 0.3f, 1.0f }),
 							rynx::components::physical_body().mass(std::numeric_limits<float>::max()).friction(1.0f).elasticity(0.0f).moment_of_inertia(std::numeric_limits<float>::max()),
@@ -80,7 +457,7 @@ private:
 							rynx::components::position(mouse_z_plane.first, 0.0f),
 							rynx::components::motion{},
 							rynx::components::collisions{ m_dynamic_collisions.value },
-							rynx::components::boundary({ p.generateBoundary_Outside(1.0f) }, mouse_z_plane.first, 0.0f),
+							rynx::components::boundary(p, mouse_z_plane.first, 0.0f),
 							rynx::components::radius(p.radius()),
 							rynx::components::color({ 0.2f, 1.0f, 0.3f, 1.0f }),
 							rynx::components::physical_body().mass(550.0f).friction(1.0f).elasticity(0.0f).moment_of_inertia(p, 2.0f),
@@ -234,6 +611,8 @@ public:
 			0.14f
 		);
 
+		root.addChild(sampleButton);
+
 		/*
 		auto sampleButton2 = std::make_shared<rynx::menu::Button>(*application.textures(), "Frame", &root, rynx::vec3<float>(0.4f, 0.1f, 0), rynx::vec3<float>(), 0.16f);
 		auto sampleButton3 = std::make_shared<rynx::menu::Button>(*application.textures(), "Frame", &root, rynx::vec3<float>(0.4f, 0.1f, 0), rynx::vec3<float>(), 0.18f);
@@ -242,9 +621,9 @@ public:
 		*/
 
 		sampleButton->text("Log Profile").font(&fontConsola);
-		sampleButton->alignToInnerEdge(&root, rynx::menu::Align::BOTTOM_LEFT);
+		sampleButton->align().bottom_left_inside();
 		sampleButton->color_frame(Color::RED);
-		sampleButton->onClick([]() {
+		sampleButton->on_click([]() {
 			rynx::profiling::write_profile_log();
 		});
 
@@ -285,8 +664,6 @@ public:
 		megaSlider->onValueChanged([](float f) {});
 		*/
 
-		root.addChild(sampleButton);
-
 		/*
 		root.addChild(sampleButton2);
 		root.addChild(sampleButton3);
@@ -301,6 +678,7 @@ public:
 
 	GameMenu& add_child(std::shared_ptr<rynx::menu::Component> child) {
 		root.addChild(std::move(child));
+		return *this;
 	}
 
 

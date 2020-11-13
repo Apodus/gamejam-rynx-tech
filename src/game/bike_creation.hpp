@@ -41,7 +41,7 @@ namespace game {
 			light,
 			rynx::components::position(pos, angle),
 			rynx::components::collisions{ dynamicCollisions.value },
-			rynx::components::boundary({ poly.generateBoundary_Outside(head_radius_scale) }, pos, angle),
+			rynx::components::boundary(rynx::polygon(poly).scale(head_radius_scale).recompute_normals(), pos, angle),
 			rynx::components::mesh(meshes.get("head")),
 			rynx::matrix4(),
 			rynx::components::radius(radius * head_radius_scale),

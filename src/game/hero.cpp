@@ -47,8 +47,7 @@ void game::hero_control::onFrameProcess(rynx::scheduler::context& context, float
 		rynx::ecs::view<const rynx::components::collision_custom_reaction, game::components::suspension, const rynx::components::phys::joint, rynx::components::particle_emitter, rynx::components::position, rynx::components::motion, rynx::components::phys::joint, const rynx::components::physical_body, const game::hero_tag> ecs,
 		rynx::mapped_input& input,
 		rynx::sound::audio_system& audio,
-		rynx::camera& camera,
-		rynx::scheduler::task& task_context)
+		rynx::camera& camera)
 	{
 		constexpr float max_speed = 75;
 		constexpr float max_acceleration = 700;

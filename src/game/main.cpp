@@ -55,19 +55,6 @@
 #include <game/terrain.hpp>
 #include <game/bike_creation.hpp>
 
-template<typename T>
-struct range {
-	range(T b, T e) : begin(b), end(e) {}
-	range() = default;
-
-	T begin;
-	T end;
-
-	T operator()(float v) const {
-		return static_cast<T>(begin * (1.0f - v) + end * v);
-	}
-};
-
 void attach_fire_to(rynx::ecs& ecs, rynx::ecs::id id) {
 	rynx::components::particle_emitter emitter;
 	emitter.edit().color_ranges(
@@ -142,16 +129,6 @@ int main(int argc, char** argv) {
 
 	GameMenu menu(application.textures());
 
-	if constexpr(false)
-	{
-		auto editor_top = std::make_shared<rynx::menu::Div>(rynx::vec3f{ 0.5f, 1.0f, 0.0f });
-		editor_top->alignToInnerEdge(menu.root_node(), rynx::menu::Align::RIGHT);
-		auto button_create_polygon = std::make_shared<rynx::menu::Button>(*application.textures(), "Frame", rynx::vec3f(1.0f, 1.0f, 0.0f));
-		editor_top->addChild(button_create_polygon);
-		menu.add_child(editor_top);
-		button_create_polygon->onClick([this_ptr = button_create_polygon.get()]() {this_ptr->position_local({-1.0f, 0.0f, 0.0f}); });
-	}
-
 	std::unique_ptr<rynx::collision_detection> detection = std::make_unique<rynx::collision_detection>();
 	
 	rynx::sound::audio_system audio;
@@ -219,6 +196,10 @@ int main(int argc, char** argv) {
 		gamestate.include_id(state_id_user_controls);
 	}
 
+
+	auto editor_top = std::make_shared<rynx::menu::Div>(rynx::vec3f{ 1.0f, 1.0f, 0.0f });
+	menu.add_child(editor_top);
+
 	// setup game logic
 	{
 		auto ruleset_hero_inputs = base_simulation.rule_set(state_id_user_controls).create<game::hero_control>(gameInput, back_wheel_id, front_wheel_id, head_id, bike_body_id, hand_joint_id);
@@ -228,7 +209,17 @@ int main(int argc, char** argv) {
 		auto ruleset_lifetime_updates = base_simulation.rule_set(state_id_physics).create<rynx::ruleset::lifetime_updates>();
 		auto ruleset_particle_update = base_simulation.rule_set(state_id_physics).create<rynx::ruleset::particle_system>();
 		auto ruleset_frustum_culling = base_simulation.rule_set(state_id_update_frustum_culling).create<rynx::ruleset::frustum_culling>(camera);
-		auto ruleset_editor_rules = base_simulation.rule_set(editorstate).create<editor_rules>(gameInput, gameCollisionsSetup.category_dynamic(), gameCollisionsSetup.category_static(), gamestate, editorstate);
+		auto ruleset_editor_rules = base_simulation.rule_set(editorstate)
+			.create<editor_rules>(
+				*base_simulation.m_context,
+				editor_top,
+				*application.textures(),
+				gameInput,
+				gameCollisionsSetup.category_dynamic(),
+				gameCollisionsSetup.category_static(),
+				gamestate,
+				editorstate
+			);
 		auto ruleset_debug_input = base_simulation.rule_set().create<debug_input>(gameInput, gamestate, editorstate, state_id_update_frustum_culling);
 
 		ruleset_physical_springs->depends_on(ruleset_motion_updates);
@@ -236,8 +227,6 @@ int main(int argc, char** argv) {
 		ruleset_frustum_culling->depends_on(ruleset_motion_updates);
 		ruleset_hero_inputs->depends_on(ruleset_motion_updates);
 	}
-
-	gameInput.generateAndBindGameKey(gameInput.getMouseKeyPhysical(0), "menuCursorActivation");
 
 	rynx::graphics::screenspace_draws(); // initialize gpu buffers for screenspace ops.
 	rynx::application::renderer render(application, camera);
@@ -277,10 +266,8 @@ int main(int argc, char** argv) {
 	path.m_points.emplace_back(rynx::vec3f{ -450.0f, -50.0f, 0.0f });
 	auto path_points = path.generate(10);
 
-	rynx::polygon p;
-	p.vertices = path_points;
-	p.generateBoundary_Outside(1.0f);
-
+	rynx::polygon p(path_points);
+	
 	auto mesh_p = meshes->create("spline", rynx::polygon_triangulation().make_boundary_mesh(p, application.textures()->textureLimits("Empty")), "Empty");
 
 	ecs.create(
@@ -332,14 +319,17 @@ int main(int argc, char** argv) {
 		camera->setProjection(0.02f, 2000.0f, application.aspectRatio());
 		camera->rebuild_view_matrix();
 
+		// note: important to do menu tick before starting game logic, because
+		//       input that is captured by the menus needs to be consumed before
+		//       game takes a look at input state.
+		menu.logic_tick(dt, application.aspectRatio(), gameInput);
+
 		{
 			rynx_profile("Main", "Wait for frame end");
 			base_simulation.generate_tasks(dt);
 			scheduler.start_frame();
 			scheduler.wait_until_complete();
 		}
-
-		menu.logic_tick(dt, application.aspectRatio(), gameInput);
 
 		float length_of_current = (path_points[int32_t(path_point) % path_points.size()] - path_points[(int32_t(path_point) + 1) % path_points.size()]).length();
 
