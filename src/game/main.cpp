@@ -74,8 +74,6 @@ void attach_fire_to(rynx::ecs& ecs, rynx::ecs::id id) {
 	ecs.attachToEntity(id, emitter);
 }
 
-
-
 int main(int argc, char** argv) {
 
 	// uses this thread services of rynx, for example in cpu performance profiling.
@@ -88,10 +86,12 @@ int main(int argc, char** argv) {
 	
 	std::cout << "loading textures.." << std::endl;
 	application.loadTextures("../textures/textures.txt");
-	
-	application.meshRenderer().loadDefaultMesh("Empty");
 
-	auto meshes = application.meshRenderer().meshes();
+	Font consolaFont(Fonts::setFontConsolaMono());
+	application.renderer().loadDefaultMesh("Empty");
+	application.renderer().setDefaultFont(consolaFont);
+
+	auto meshes = application.renderer().meshes();
 	{
 		meshes->create("ball", rynx::Shape::makeCircle(1.0f, 32), "Hero");
 		meshes->create("circle_empty", rynx::Shape::makeCircle(1.0f, 32), "Empty");
@@ -118,12 +118,16 @@ int main(int argc, char** argv) {
 	rynx::scheduler::task_scheduler scheduler;
 	rynx::application::simulation base_simulation(scheduler);
 	rynx::ecs& ecs = base_simulation.m_ecs;
+	
+	rynx::reflection::reflections type_reflections(ecs.get_type_index());
 
 	std::shared_ptr<rynx::camera> camera = std::make_shared<rynx::camera>();
 	camera->setProjection(0.02f, 20000.0f, application.aspectRatio());
 	camera->setUpVector({0, 1, 0});
 	camera->setDirection({ 0, 0, -1 });
 	camera->setPosition({ 0, 0, +130 });
+
+	
 
 	rynx::mapped_input gameInput(application.input());
 
@@ -176,6 +180,7 @@ int main(int argc, char** argv) {
 		base_simulation.set_resource(&gameInput);
 		base_simulation.set_resource(&audio);
 		base_simulation.set_resource(camera.get());
+		base_simulation.set_resource(&type_reflections);
 	}
 	
 	const auto [back_wheel_id, front_wheel_id, head_id, bike_body_id, hand_joint_id] = game::construct_player(ecs, *application.textures(), gameCollisionsSetup.category_dynamic(), *meshes, { -100, 0, 0 });
@@ -212,6 +217,8 @@ int main(int argc, char** argv) {
 		auto ruleset_editor_rules = base_simulation.rule_set(editorstate)
 			.create<editor_rules>(
 				*base_simulation.m_context,
+				type_reflections,
+				&menu.fontConsola,
 				editor_top,
 				*application.textures(),
 				gameInput,
@@ -237,7 +244,12 @@ int main(int argc, char** argv) {
 	render.light_global_ambient({ 1.0f, 1.0f, 1.0f, 0.25f });
 	render.light_global_directed({ 1.0f, 1.0f, 1.0f, 0.0f }, { 1, 0 ,0 });
 
-	auto bg_draw = std::make_unique<rynx::application::visualization::scrolling_background_2d>(application.meshRenderer(), camera, meshes->get("background"));
+	auto bg_draw = std::make_unique<rynx::application::visualization::scrolling_background_2d>(
+		application.renderer(),
+		camera,
+		meshes->get("background")
+	);
+
 	auto* p_bg_draw = bg_draw.get();
 	render.geometry_step_insert_front(std::move(bg_draw));
 
@@ -280,6 +292,7 @@ int main(int argc, char** argv) {
 	);
 
 	float path_point = 0.0f;
+	float application_runtime = 0.0f;
 
 	rynx::numeric_property<float> logic_fps;
 	rynx::numeric_property<float> render_fps;
@@ -287,6 +300,8 @@ int main(int argc, char** argv) {
 	while (!application.isExitRequested()) {
 		rynx_profile("Main", "frame");
 		
+		application_runtime += dt;
+
 		{
 			rynx_profile("Main", "start frame");
 			application.startFrame();
@@ -327,6 +342,7 @@ int main(int argc, char** argv) {
 		{
 			rynx_profile("Main", "Wait for frame end");
 			base_simulation.generate_tasks(dt);
+			auto input_inhibited_scope = menu.inhibit_dedicated_inputs(gameInput);
 			scheduler.start_frame();
 			scheduler.wait_until_complete();
 		}
@@ -356,8 +372,8 @@ int main(int argc, char** argv) {
 				scheduler.start_frame();
 
 				// while waiting for computing to be completed, draw menus.
-				application.meshRenderer().setDepthTest(false);
-				menu.graphics_tick(application.aspectRatio(), application.meshRenderer(), application.textRenderer());
+				application.renderer().setDepthTest(false);
+				menu.graphics_tick(application.aspectRatio(), application.renderer());
 
 				scheduler.wait_until_complete();
 			}
@@ -365,12 +381,33 @@ int main(int argc, char** argv) {
 			{
 				rynx_profile("Main", "draw");
 				
-				std::string logic_fps_text = "logic fps: " + std::to_string(int(100 * logic_fps.avg()) / 100.0f);
-				application.textRenderer().drawText(logic_fps_text, -0.9f, +0.9f / application.aspectRatio(), 0.1f, Color::GREEN, rynx::TextRenderer::Align::Left, menu.fontConsola);
+				rynx::graphics::renderable_text logic_fps_line;
+				float orientation_angle_v = std::sin(application_runtime) * 0.5f + rynx::math::pi * 0.5f;
+				logic_fps_line.orientation().forward = rynx::vec3f(std::cos(orientation_angle_v), 0, std::sin(orientation_angle_v) * -1);
+				logic_fps_line.orientation().up = rynx::vec3f(0, 1, 0);
+				logic_fps_line
+					.text("logic fps: " + std::to_string(int(100 * logic_fps.avg()) / 100.0f))
+					.pos({ 0.0f, +0.9f / application.aspectRatio(), 0 })
+					.font_size(0.02f)
+					.color(Color::GREEN)
+					.align_center()
+					.font(&menu.fontConsola);
 
-				std::string render_fps_text = "render fps: " + std::to_string(int(100 * render_fps.avg()) / 100.0f);
-				application.textRenderer().drawText(render_fps_text, -0.9f, +0.8f / application.aspectRatio(), 0.1f, Color::GREEN, rynx::TextRenderer::Align::Left, menu.fontConsola);
+				rynx::graphics::renderable_text graphics_fps_line;
+				graphics_fps_line.orientation().up = rynx::vec3f(0, 1, 0);
+				graphics_fps_line
+					.text("render fps: " + std::to_string(int(100 * render_fps.avg()) / 100.0f))
+					.pos({ 0.0f, +0.87f / application.aspectRatio(), 0 })
+					.font_size(0.02f)
+					.color(Color::GREEN)
+					.align_center()
+					.font(&menu.fontConsola);
 
+
+				application.renderer().drawText(logic_fps_line);
+				application.renderer().drawText(graphics_fps_line);
+
+				/*
 				bool front_wheel_touching_terrain = false;
 				bool back_wheel_touching_terrain = false;
 				ecs.query().for_each([&](rynx::ecs::id id, rynx::components::collision_custom_reaction& cols) {
@@ -392,6 +429,7 @@ int main(int argc, char** argv) {
 
 				application.textRenderer().drawText("BW", -0.9f, +0.7f / application.aspectRatio(), 0.1f, back_wheel_touching_terrain ? Color::GREEN : Color::RED, rynx::TextRenderer::Align::Left, menu.fontConsola);
 				application.textRenderer().drawText("FW", -0.7f, +0.7f / application.aspectRatio(), 0.1f, front_wheel_touching_terrain ? Color::GREEN : Color::RED, rynx::TextRenderer::Align::Left, menu.fontConsola);
+				*/
 
 				// present result of previous frame.
 				application.swapBuffers();

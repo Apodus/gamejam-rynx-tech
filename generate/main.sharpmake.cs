@@ -7,6 +7,31 @@ using Sharpmake;
 [module: Sharpmake.Include("../rynx/generate/rynx_tests.sharpmake.cs")]
 
 [Generate]
+class Editor : RynxProject
+{
+    public Editor()
+    {
+        SourceRootPath = @"[project.SharpmakeCsPath]\..\src\editor\";
+    }
+	
+	[Configure]
+    public void ConfigureAll(Project.Configuration conf, Target target)
+    {
+		conf.AddPublicDependency<Input>(target);
+		conf.AddPublicDependency<Menu>(target);
+		conf.AddPublicDependency<Graphics>(target);
+		conf.AddPublicDependency<Tech>(target);
+		conf.AddPublicDependency<Scheduler>(target);
+		
+		conf.TargetFileName = Name;
+		conf.SolutionFolder = "game";
+		conf.TargetPath = @"[project.SharpmakeCsPath]\..\build\bin\";
+		conf.Output = Project.Configuration.OutputType.Lib;
+    }
+}
+
+
+[Generate]
 class Game : RynxProject
 {
     public Game()
@@ -20,12 +45,13 @@ class Game : RynxProject
 		conf.AddPublicDependency<RuleSets>(target);
 		conf.AddPublicDependency<Input>(target);
 		conf.AddPublicDependency<Menu>(target);
-        conf.AddPublicDependency<Graphics>(target);
+		conf.AddPublicDependency<Graphics>(target);
 		conf.AddPublicDependency<Tech>(target);
 		conf.AddPublicDependency<Scheduler>(target);
+		conf.AddPublicDependency<Editor>(target);
 		
 		conf.TargetFileName = Name;
-		conf.SolutionFolder = "";
+		conf.SolutionFolder = "game";
 		conf.TargetPath = @"[project.SharpmakeCsPath]\..\build\bin\";
 		conf.Output = Project.Configuration.OutputType.Exe;
 		

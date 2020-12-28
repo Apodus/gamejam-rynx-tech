@@ -12,7 +12,7 @@
 #include <memory>
 
 namespace game {
-	rynx::ecs::id create_terrain(rynx::ecs& ecs, rynx::mesh_collection& meshes, rynx::graphics::GPUTextures& textures, std::string terrainTexture, rynx::collision_detection::category_id terrainCollisionCategory) {
+	rynx::ecs::id create_terrain(rynx::ecs& ecs, rynx::graphics::mesh_collection& meshes, rynx::graphics::GPUTextures& textures, std::string terrainTexture, rynx::collision_detection::category_id terrainCollisionCategory) {
 
 		std::string mesh_name("terrain");
 
@@ -32,7 +32,7 @@ namespace game {
 			}
 
 			terrain_surface = p;
-			terrain_surface.recompute_normals();
+			terrain_surface.invert();
 
 			editor.emplace_back(rynx::vec3f{ +5100.0f, -1000.0f, 0.0f });
 			editor.emplace_back(rynx::vec3f{ -600.0f, -1000.0f, 0.0f });
@@ -41,7 +41,7 @@ namespace game {
 
 		terrain_surface.scale(1.0f / p.radius());
 		
-		std::unique_ptr<rynx::mesh> m = std::make_unique<rynx::mesh>();
+		std::unique_ptr<rynx::graphics::mesh> m = std::make_unique<rynx::graphics::mesh>();
 		auto uv_limits = textures.textureLimits(terrainTexture);
 
 		for (int32_t i = 0; i < terrain_surface.size(); ++i) {
@@ -83,7 +83,6 @@ namespace game {
 
 		auto* mesh_p = meshes.create(mesh_name, std::move(m), "Empty");
 		float radius = p.radius();
-		p.recompute_normals();
 
 		return ecs.create(
 			rynx::components::position({}, 0.0f),

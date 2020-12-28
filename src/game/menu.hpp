@@ -2,6 +2,8 @@
 #include <rynx/menu/Div.hpp>
 #include <rynx/menu/Button.hpp>
 #include <rynx/menu/Slider.hpp>
+#include <rynx/menu/List.hpp>
+
 #include <rynx/math/vector.hpp>
 
 #include <rynx/tech/profiling.hpp>
@@ -14,8 +16,12 @@
 #include <rynx/graphics/text/fontdata/consolamono.hpp>
 #include <rynx/graphics/text/fontdata/lenka.hpp>
 
+#include <rynx/graphics/renderer/textrenderer.hpp>
+
 #include <rynx/math/geometry/ray.hpp>
 #include <rynx/math/geometry/plane.hpp>
+
+#include <editor/editor.hpp>
 
 class ieditor_tool {
 public:
@@ -33,6 +39,11 @@ namespace tools {
 		}
 
 		virtual void update(rynx::scheduler::context& ctx) override {
+			if (m_run_on_main_thread) {
+				m_run_on_main_thread();
+				m_run_on_main_thread = nullptr;
+			}
+
 			ctx.add_task("editor tick", [this](
 				rynx::ecs& game_ecs,
 				rynx::mapped_input& gameInput,
@@ -52,6 +63,10 @@ namespace tools {
 
 		rynx::ecs::id selected_entity() const {
 			return m_selected_entity_id;
+		}
+
+		void on_entity_selected(std::function<void(rynx::ecs::id)> op) {
+			m_on_entity_selected = std::move(op);
 		}
 
 		virtual void on_tool_selected() override {
@@ -105,10 +120,17 @@ namespace tools {
 				}
 
 				m_selected_entity_id = best_id;
+				if (m_on_entity_selected) {
+					m_run_on_main_thread = [this, selected_entity = m_selected_entity_id]() {
+						m_on_entity_selected(selected_entity);
+					};
+				}
 				std::cerr << "entity selection tool picked: " << best_id.value << std::endl;
 			}
 		}
 
+		std::function<void()> m_run_on_main_thread;
+		std::function<void(rynx::ecs::id)> m_on_entity_selected;
 		rynx::ecs::id m_selected_entity_id;
 		rynx::floats4 m_selected_entity_original_color;
 		rynx::key::logical m_activation_key;
@@ -343,10 +365,13 @@ class editor_rules : public rynx::application::logic::iruleset {
 	tools::polygon_tool m_polygon_tool;
 	
 	ieditor_tool* m_active_tool;
+	rynx::reflection::reflections& m_reflections;
 
 public:
 	editor_rules(
 		rynx::scheduler::context& ctx,
+		rynx::reflection::reflections& reflections,
+		Font* font,
 		std::shared_ptr<rynx::menu::Div> editor_menu,
 		rynx::graphics::GPUTextures& textures,
 		rynx::mapped_input& gameInput,
@@ -357,6 +382,7 @@ public:
 	: m_editor_menu(editor_menu)
 	, m_selection_tool(ctx)
 	, m_polygon_tool(ctx, &m_selection_tool)
+	, m_reflections(reflections)
 	{
 		// create editor menus
 		{
@@ -373,24 +399,88 @@ public:
 				return inRect;
 			});
 
-			m_editor_menu->addChild(editor_tools_side_bar);
-			
-			auto side_bar_frame = std::make_shared<rynx::menu::Frame>(textures, "Frame");
-			editor_tools_side_bar->addChild(side_bar_frame);
+			auto editor_entity_properties_bar = std::make_shared<rynx::menu::Div>(rynx::vec3f(0.3f, 1.0f, 0.0f));
+			editor_entity_properties_bar->align().left_inside().offset(+0.9f);
+			editor_entity_properties_bar->on_hover([ptr = editor_entity_properties_bar.get()](rynx::vec3f mousePos, bool inRect) {
+				if (inRect) {
+					ptr->align().offset(0.0f);
+				}
+				else {
+					ptr->align().offset(+0.9f);
+				}
+				return inRect;
+			});
 
-			auto selection_tool_button = std::make_shared<rynx::menu::Button>(textures, "Frame", rynx::vec3f(0.15f, 0.15f * 0.3f, 0.0f));
-			selection_tool_button->respect_aspect_ratio();
-			selection_tool_button->align().target(editor_tools_side_bar.get()).top_left_inside().offset(-0.3f);
-			// selection_tool_button->text("hehe");
-			selection_tool_button->on_click([this]() { switch_to_tool(m_selection_tool); });
-			editor_tools_side_bar->addChild(selection_tool_button);
-			
-			auto polygon_tool_button = std::make_shared<rynx::menu::Button>(textures, "Frame", rynx::vec3f(0.15f, 0.15f * 0.3f, 0.0f));
-			polygon_tool_button->align().target(selection_tool_button.get()).right_outside().offset_x(0.3f).top_inside();
-			polygon_tool_button->respect_aspect_ratio();
-			// polygon_tool_button->text("boo");
-			polygon_tool_button->on_click([this]() { switch_to_tool(m_polygon_tool); });
-			editor_tools_side_bar->addChild(polygon_tool_button);
+			m_editor_menu->addChild(editor_tools_side_bar);
+			m_editor_menu->addChild(editor_entity_properties_bar);
+
+			editor_tools_side_bar->set_background(textures, "Frame");
+			editor_entity_properties_bar->set_background(textures, "Frame");
+		
+			// editor tools menu
+			{
+				auto selection_tool_button = std::make_shared<rynx::menu::Button>(textures, "Frame", rynx::vec3f(0.15f, 0.15f * 0.3f, 0.0f));
+				selection_tool_button->respect_aspect_ratio();
+				selection_tool_button->align().target(editor_tools_side_bar.get()).top_left_inside().offset(-0.3f);
+				selection_tool_button->velocity_position(100.0f);
+				// selection_tool_button->text("hehe");
+				selection_tool_button->on_click([this]() { switch_to_tool(m_selection_tool); });
+				editor_tools_side_bar->addChild(selection_tool_button);
+
+				auto polygon_tool_button = std::make_shared<rynx::menu::Button>(textures, "Frame", rynx::vec3f(0.15f, 0.15f * 0.3f, 0.0f));
+				polygon_tool_button->align().target(selection_tool_button.get()).right_outside().offset_x(0.3f).top_inside();
+				polygon_tool_button->respect_aspect_ratio();
+				polygon_tool_button->velocity_position(100.0f);
+				// polygon_tool_button->text("boo");
+				polygon_tool_button->on_click([this]() { switch_to_tool(m_polygon_tool); });
+				editor_tools_side_bar->addChild(polygon_tool_button);
+			}
+
+			// editor entity view menu
+			{
+				auto entity_property_list = std::make_shared<rynx::menu::List>(textures, "Frame", rynx::vec3f(1.0f, 1.0f, 0.0f));
+				entity_property_list->list_endpoint_margin(0.05f);
+				entity_property_list->list_element_margin(0.05f);
+				entity_property_list->list_element_velocity(2500.0f);
+
+				editor_entity_properties_bar->addChild(entity_property_list);
+
+				m_selection_tool.on_entity_selected([this, font, &reflections, &ctx, &textures, entity_property_list](rynx::ecs::id id) {
+					rynx::ecs& ecs = ctx.get_resource<rynx::ecs>();
+					auto reflections_vec = ecs[id].reflections(m_reflections);
+					entity_property_list->clear_children();
+
+					for (auto&& reflection_entry : reflections_vec) {
+						auto component_sheet = std::make_shared<rynx::menu::Div>(rynx::vec3f(0.0f, 0.0f, 0.0f));
+						component_sheet->set_background(textures, "Frame");
+						component_sheet->set_dynamic_position_and_scale();
+						entity_property_list->addChild(component_sheet);
+
+						auto component_name = std::make_shared<rynx::menu::Button>(textures, "Frame", rynx::vec3f(0.6f, 0.025f, 0.0f));
+						component_name->text()
+							.text(reflection_entry.m_type_name)
+							.text_align_left()
+							.font(font);
+						
+						component_name->align()
+							.top_inside()
+							.left_inside()
+							.offset_kind_relative_to_self()
+							.offset_y(-0.5f);
+
+						component_sheet->addChild(component_name);
+						component_name->velocity_position(100.0f);
+						
+						rynx::editor::rynx_common_info component_common_info;
+						component_common_info.component_type_id = reflection_entry.m_type_index_value;
+						component_common_info.ecs = &ecs;
+						component_common_info.entity_id = id;
+						component_common_info.textures = &textures;
+
+						rynx::editor::generate_menu_for_reflection(reflections, reflection_entry, component_common_info, component_sheet.get());
+					}
+				});
+			}
 		}
 
 		m_active_tool = &m_selection_tool;
@@ -582,7 +672,7 @@ private:
 
 class GameMenu {
 
-	rynx::menu::Div root;
+	rynx::menu::System system;
 
 	std::shared_ptr<rynx::graphics::framebuffer> fbo_menu;
 	std::shared_ptr<rynx::camera> m_camera;
@@ -592,7 +682,6 @@ public:
 	Font fontConsola;
 
 	GameMenu(std::shared_ptr<rynx::graphics::GPUTextures> textures) :
-		root({ 1, 1, 0 }),
 		fontConsola(Fonts::setFontConsolaMono()),
 		fontLenka(Fonts::setFontLenka())
 	{
@@ -611,7 +700,7 @@ public:
 			0.14f
 		);
 
-		root.addChild(sampleButton);
+		system.root()->addChild(sampleButton);
 
 		/*
 		auto sampleButton2 = std::make_shared<rynx::menu::Button>(*application.textures(), "Frame", &root, rynx::vec3<float>(0.4f, 0.1f, 0), rynx::vec3<float>(), 0.16f);
@@ -620,9 +709,9 @@ public:
 		auto megaSlider = std::make_shared<rynx::menu::SlideBarVertical>(*application.textures(), "Frame", "Selection", &root, rynx::vec3<float>(0.4f, 0.1f, 0));
 		*/
 
-		sampleButton->text("Log Profile").font(&fontConsola);
+		sampleButton->text().text("Log Profile").font(&fontConsola);
 		sampleButton->align().bottom_left_inside();
-		sampleButton->color_frame(Color::RED);
+		sampleButton->color(Color::RED);
 		sampleButton->on_click([]() {
 			rynx::profiling::write_profile_log();
 		});
@@ -673,28 +762,28 @@ public:
 	}
 
 	rynx::menu::Component* root_node() {
-		return &root;
+		return system.root();
 	}
 
 	GameMenu& add_child(std::shared_ptr<rynx::menu::Component> child) {
-		root.addChild(std::move(child));
+		system.root()->addChild(std::move(child));
 		return *this;
 	}
 
 
 	void logic_tick(float dt, float aspectRatio, rynx::mapped_input& gameInput) {
-		root.input(gameInput);
-		root.tick(dt, aspectRatio);
+		system.input(gameInput);
+		system.update(dt, aspectRatio);
 		m_camera->tick(dt * 5.0f);
 	}
 
-	void graphics_tick(float aspectRatio, rynx::MeshRenderer& meshRenderer, rynx::TextRenderer& textRenderer) {
+	void graphics_tick(float aspectRatio, rynx::graphics::renderer& meshRenderer) {
 		fbo_menu->bind_as_output();
 		fbo_menu->clear();
 
 		// 2, 2 is the size of the entire screen (in case of 1:1 aspect ratio) for menu camera. left edge is [-1, 0], top right is [+1, +1], etc.
 		// so we make it size 2,2 to cover all of that. and then take aspect ratio into account by dividing the y-size.
-		root.scale_local({ 2 , 2 / aspectRatio, 0 });
+		system.root()->scale_local({ 2 , 2 / aspectRatio, 0 });
 		m_camera->setProjection(0.01f, 50.0f, aspectRatio);
 		m_camera->setPosition({ 0, 0, 1 });
 		m_camera->setDirection({0, 0, -1});
@@ -702,9 +791,12 @@ public:
 		m_camera->rebuild_view_matrix();
 
 		meshRenderer.setCamera(m_camera);
-		textRenderer.setCamera(m_camera);
 		meshRenderer.cameraToGPU();
-		root.visualise(meshRenderer, textRenderer);
+		system.draw(meshRenderer);
+	}
+
+	rynx::scoped_input_inhibitor inhibit_dedicated_inputs(rynx::mapped_input& input) {
+		return system.inhibit_dedicated_inputs(input);
 	}
 
 	std::shared_ptr<rynx::graphics::framebuffer> fbo() {

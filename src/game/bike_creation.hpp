@@ -15,7 +15,12 @@ namespace game {
 	}
 
 	// construct hero object.
-	auto construct_player(rynx::ecs& ecs, rynx::graphics::GPUTextures& textures, rynx::collision_detection::category_id dynamicCollisions, rynx::mesh_collection& meshes, rynx::vec3f pos)
+	auto construct_player(
+		rynx::ecs& ecs,
+		rynx::graphics::GPUTextures& textures,
+		rynx::collision_detection::category_id dynamicCollisions,
+		rynx::graphics::mesh_collection& meshes,
+		rynx::vec3f pos)
 	{
 		auto poly = rynx::Shape::makeBox(15.0f);
 
