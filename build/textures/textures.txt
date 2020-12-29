@@ -1,4 +1,6 @@
 FONT_CONSOLA_MONO ../textures/font/consola1024.png
 RakettiAtlas ../textures/raketti.png
+EditorAtlas ../textures/editor.png
 background ../textures/bricks01.png
 atlas RakettiAtlas ../textures/atlas/raketti.txt
+atlas EditorAtlas ../textures/atlas/editor.txt

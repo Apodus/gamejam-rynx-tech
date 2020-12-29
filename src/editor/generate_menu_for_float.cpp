@@ -3,6 +3,23 @@
 
 #include <sstream>
 
+std::string humanize(std::string s) {
+	auto replace_all = [&s](std::string what, std::string with) {
+		while (s.find(what) != s.npos) {
+			s.replace(s.find(what), what.length(), with);
+		}
+	};
+	
+	replace_all("class", "");
+	replace_all("struct", "");
+	replace_all(" ", "");
+	replace_all("rynx::math", "r::m");
+	replace_all("rynx::", "r::");
+	replace_all("vec3<float>", "vec3f");
+	replace_all("vec4<float>", "vec4f");
+	return s;
+}
+
 void rynx::editor::float_field(
 	const rynx::reflection::field& member,
 	struct rynx_common_info info,
@@ -14,7 +31,7 @@ void rynx::editor::float_field(
 
 	auto field_container = std::make_shared<rynx::menu::Div>(rynx::vec3f(0.6f, 0.03f, 0.0f));
 	auto variable_name_label = std::make_shared<rynx::menu::Text>(rynx::vec3f(0.4f, 1.0f, 0.0f));
-	variable_name_label->text(std::string(2 * info.indent, '-') + member.m_field_name);
+	variable_name_label->text(std::string(info.indent, '-') + member.m_field_name);
 	variable_name_label->text_align_left();
 
 	auto variable_value_field = std::make_shared<rynx::menu::Button>(*info.textures, "Frame", rynx::vec3f(0.4f, 1.0f, 0.0f));
@@ -62,18 +79,10 @@ void rynx::editor::float_field(
 		.text_align_right()
 		.input_enable();
 
-	variable_value_field->text().on_value_changed([info, mem_offset, config](const std::string& s) {
-		float new_value = 0.0f;
-		try { new_value = config.constrain(std::stof(s)); }
-		catch (...) { return; }
-
-		ecs_value_editor().access<float>(*info.ecs, info.entity_id, info.component_type_id, mem_offset) = new_value;
-	});
-
 	std::shared_ptr<rynx::menu::SlideBarVertical> value_slider;
 
 	if (config.slider_dynamic) {
-		value_slider = std::make_shared<rynx::menu::SlideBarVertical>(*info.textures, "Frame", "Frame", rynx::vec3f(0.2f, 1.0f, 0.0f), -1.0f, +1.0f);
+		value_slider = std::make_shared<rynx::menu::SlideBarVertical>(*info.textures, "Editor_Frame", "Editor_Frame", rynx::vec3f(0.2f, 1.0f, 0.0f), -1.0f, +1.0f);
 		value_slider->setValue(0);
 		value_slider->on_active_tick([info, mem_offset, config, self = value_slider.get(), text_element = variable_value_field.get()](float /* input_v */, float dt) {
 			float& v = ecs_value_editor().access<float>(*info.ecs, info.entity_id, info.component_type_id, mem_offset);
@@ -97,8 +106,8 @@ void rynx::editor::float_field(
 	else {
 		value_slider = std::make_shared<rynx::menu::SlideBarVertical>(
 			*info.textures,
-			"Frame",
-			"Frame",
+			"Editor_Frame",
+			"Editor_SliderMarker",
 			rynx::vec3f(0.2f, 1.0f, 0.0f),
 			config.min_value,
 			config.max_value);
@@ -111,21 +120,32 @@ void rynx::editor::float_field(
 		});
 	}
 
+	variable_value_field->text().on_value_changed([info, mem_offset, config, slider_ptr = value_slider.get()](const std::string& s) {
+		float new_value = 0.0f;
+		try { new_value = config.constrain(std::stof(s)); }
+		catch (...) { return; }
+
+		ecs_value_editor().access<float>(*info.ecs, info.entity_id, info.component_type_id, mem_offset) = new_value;
+		if (!config.slider_dynamic) {
+			slider_ptr->setValue(new_value);
+		}
+	});
+
 	value_slider->align().right_inside().top_inside().offset_x(-0.15f);
 	variable_value_field->align().target(value_slider.get()).left_outside().top_inside();
 	variable_name_label->align().left_inside().top_inside();
 
 	field_container->addChild(variable_name_label);
-	field_container->addChild(variable_value_field);
 	field_container->addChild(value_slider);
+	field_container->addChild(variable_value_field);
 
 	field_container->align()
 		.target(component_sheet->last_child())
 		.bottom_outside()
 		.left_inside();
 
-	field_container->velocity_position(500.0f);
-	variable_name_label->velocity_position(1000.0f);
+	// field_container->velocity_position(500.0f);
+	variable_name_label->velocity_position(2000.0f);
 	variable_value_field->velocity_position(1000.0f);
 	value_slider->velocity_position(1000.0f);
 	component_sheet->addChild(field_container);
@@ -150,7 +170,7 @@ void rynx::editor::generate_menu_for_reflection(
 		else if (reflections_.has(member.m_type_name)) {
 			auto label = std::make_shared<rynx::menu::Button>(*info.textures, "Frame", rynx::vec3f(0.6f, 0.03f, 0.0f));
 			label->text()
-				.text(std::string(info.indent + 1, '-') + member.m_field_name + " (" + member.m_type_name + ")")
+				.text(std::string(info.indent + 1, '-') + member.m_field_name + " (" + humanize(member.m_type_name) + ")")
 				.text_align_left();
 
 			label->align()
@@ -174,7 +194,7 @@ void rynx::editor::generate_menu_for_reflection(
 		else {
 			auto label = std::make_shared<rynx::menu::Button>(*info.textures, "Frame", rynx::vec3f(0.6f, 0.03f, 0.0f));
 			label->text()
-				.text(std::string(info.indent + 1, '-') + member.m_field_name + " (" + member.m_type_name + ")")
+				.text(std::string(info.indent + 1, '-') + member.m_field_name + " (" + humanize(member.m_type_name) + ")")
 				.text_align_left();
 
 			label->align()

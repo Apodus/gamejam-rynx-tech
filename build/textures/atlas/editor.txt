@@ -1,0 +1,4 @@
+- 16 16
+1 1 Editor_SliderMarker
+2 1 Editor_Frame
+3 1 Editor_Empty
