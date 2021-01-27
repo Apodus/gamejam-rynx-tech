@@ -20,7 +20,7 @@ std::string humanize(std::string s) {
 	return s;
 }
 
-void rynx::editor::float_field(
+void rynx::editor::field_float(
 	const rynx::reflection::field& member,
 	struct rynx_common_info info,
 	rynx::menu::Component* component_sheet,
@@ -50,14 +50,58 @@ void rynx::editor::float_field(
 
 	field_config config;
 
-	auto handle_annotations = [&config](
+	auto handle_annotations = [&variable_name_label, &info, &member, &config](
 		// const rynx::reflection::type& type,
 		const rynx::reflection::field& field)
 	{
+		bool skip_next = false;
 		for (auto&& annotation : field.m_annotations) {
-			if (annotation == ">=0")
+			if (annotation.starts_with("applies_to")) {
+				std::stringstream ss(annotation);
+				std::string v;
+				ss >> v;
+
+				bool self_found = false;
+				while (ss >> v) {
+					self_found |= (v == member.m_field_name);
+				}
+
+				skip_next = !self_found;
+			}
+
+			if (annotation == "applies_to_all") {
+				skip_next = false;
+			}
+			
+			if (skip_next) {
+				continue;
+			}
+			
+			if (annotation.starts_with("rename")) {
+				std::stringstream ss(annotation);
+				std::string v;
+				ss >> v >> v;
+				std::string source_name = v;
+				ss >> v;
+				if (source_name == member.m_field_name) {
+					variable_name_label->text(std::string(info.indent, '-') + v);
+				}
+			}
+			else if (annotation == ">=0") {
 				config.min_value = 0;
-			if (annotation.starts_with("range")) {
+			}
+			else if (annotation.starts_with("except")) {
+				std::stringstream ss(annotation);
+				std::string v;
+				ss >> v;
+
+				while (ss >> v) {
+					if (v == member.m_field_name) {
+						skip_next = true;
+					}
+				}
+			}
+			else if (annotation.starts_with("range")) {
 				std::stringstream ss(annotation);
 				std::string v;
 				ss >> v;
@@ -144,7 +188,6 @@ void rynx::editor::float_field(
 		.bottom_outside()
 		.left_inside();
 
-	// field_container->velocity_position(500.0f);
 	variable_name_label->velocity_position(2000.0f);
 	variable_value_field->velocity_position(1000.0f);
 	value_slider->velocity_position(1000.0f);
@@ -152,6 +195,49 @@ void rynx::editor::float_field(
 }
 
 
+void rynx::editor::field_bool(
+	const rynx::reflection::field& member,
+	struct rynx_common_info info,
+	rynx::menu::Component* component_sheet,
+	std::vector<std::pair<rynx::reflection::type, rynx::reflection::field>> reflection_stack)
+{
+	int32_t mem_offset = info.cumulative_offset + member.m_memory_offset;
+	bool value = ecs_value_editor().access<bool>(*info.ecs, info.entity_id, info.component_type_id, mem_offset);
+
+	auto field_container = std::make_shared<rynx::menu::Div>(rynx::vec3f(0.6f, 0.03f, 0.0f));
+	auto variable_name_label = std::make_shared<rynx::menu::Text>(rynx::vec3f(0.4f, 1.0f, 0.0f));
+	
+	variable_name_label->text(std::string(info.indent, '-') + member.m_field_name);
+	variable_name_label->text_align_left();
+
+	auto variable_value_field = std::make_shared<rynx::menu::Button>(*info.textures, "Frame", rynx::vec3f(0.4f, 1.0f, 0.0f));
+
+	variable_value_field->text()
+		.text(value ? "^gYes" : "^rNo")
+		.text_align_center()
+		.input_disable();
+
+	variable_value_field->on_click([info, mem_offset, self = variable_value_field.get()]() {
+		bool& value = ecs_value_editor().access<bool>(*info.ecs, info.entity_id, info.component_type_id, mem_offset);
+		value = !value;
+		self->text().text(value ? "^gYes" : "^rNo");
+	});
+
+	variable_value_field->align().right_inside().top_inside();
+	variable_name_label->align().left_inside().top_inside();
+
+	field_container->addChild(variable_name_label);
+	field_container->addChild(variable_value_field);
+
+	field_container->align()
+		.target(component_sheet->last_child())
+		.bottom_outside()
+		.left_inside();
+
+	variable_name_label->velocity_position(2000.0f);
+	variable_value_field->velocity_position(1000.0f);
+	component_sheet->addChild(field_container);
+}
 
 
 void rynx::editor::generate_menu_for_reflection(
@@ -165,7 +251,12 @@ void rynx::editor::generate_menu_for_reflection(
 		if (member.m_type_name == "float") {
 			rynx_common_info field_info = info;
 			++field_info.indent;
-			float_field(member, field_info, component_sheet_, reflection_stack);
+			field_float(member, field_info, component_sheet_, reflection_stack);
+		}
+		else if (member.m_type_name == "bool") {
+			rynx_common_info field_info = info;
+			++field_info.indent;
+			field_bool(member, field_info, component_sheet_, reflection_stack);
 		}
 		else if (reflections_.has(member.m_type_name)) {
 			auto label = std::make_shared<rynx::menu::Button>(*info.textures, "Frame", rynx::vec3f(0.6f, 0.03f, 0.0f));

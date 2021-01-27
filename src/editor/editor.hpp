@@ -29,7 +29,14 @@ namespace rynx {
 			int32_t indent = 0;
 		};
 
-		void float_field(
+		void field_float(
+			const rynx::reflection::field& member,
+			struct rynx_common_info info,
+			rynx::menu::Component* component_sheet,
+			std::vector<std::pair<rynx::reflection::type, rynx::reflection::field>>
+		);
+
+		void field_bool(
 			const rynx::reflection::field& member,
 			struct rynx_common_info info,
 			rynx::menu::Component* component_sheet,

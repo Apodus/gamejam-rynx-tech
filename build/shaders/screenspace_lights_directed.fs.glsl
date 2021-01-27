@@ -14,6 +14,12 @@ uniform int lights_num;
 
 out vec4 frag_color;
 
+float powf_approx(float a, float b) {
+  int x = floatBitsToInt(max(0.0, a));
+  int y = int(b * (x - 1064866805) + 1064866805.0);
+  return intBitsToFloat(y);
+}
+
 void main()
 {
 	vec2 uv = texCoord_pass;
@@ -33,8 +39,9 @@ void main()
 		float light_min_agr = lights_directions[i].a;
 		vec3 distance_vector = (lights_positions[i].xyz - fragment_position);
 		vec3 distance_unit = normalize(distance_vector);
-		float dir_agr = -dot(distance_unit, light_dir) - light_min_agr;
-		float soft_agr = clamp(dir_agr * lights_settings[i].x, 0.0, 1.0);
+		float dir_agr = (-dot(distance_unit, light_dir) - light_min_agr) / (1.0 - light_min_agr);
+		float soft_agr = clamp(powf_approx(dir_agr, 3.0 * lights_settings[i].x), 0.0, 1.0);
+		// float soft_agr = clamp(dir_agr * lights_settings[i].x, 0.0, 1.0);
 		
 		float distance_sqr = dot(distance_vector, distance_vector);
 		float agreement = max(lights_settings[i].a, lighting_direction_bias + dot(fragment_normal, distance_unit));
